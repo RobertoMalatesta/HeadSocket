@@ -528,7 +528,12 @@ void TcpServer::disconnect(TcpClient *client)
     HEADSOCKET_LOCK(_p->connections);
     for (size_t i = 0; i < _p->connections->size() && !found; ++i) if (_p->connections->at(i) == client) found = true;
   }
-  if (found) _p->disconnectSemaphore.notify();
+
+  if (found)
+  {
+    clientDisconnected(client);
+    _p->disconnectSemaphore.notify();
+  }
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -563,7 +568,6 @@ void TcpServer::disconnectThread()
       {
         TcpClient *client = _p->connections->at(i);
         _p->connections->erase(_p->connections->begin() + i);
-        
         delete client;
       }
       else
@@ -657,8 +661,6 @@ TcpClient::~TcpClient()
 {
   disconnect();
   delete _p;
-
-  std::cout << "~TcpClient" << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
