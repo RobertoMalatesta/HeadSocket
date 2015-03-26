@@ -107,7 +107,8 @@ protected:
   struct TcpServerImpl *_p;
 
 private:
-  void listenThread();
+  void acceptThread();
+  void disconnectThread();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -123,6 +124,7 @@ public:
 
   void disconnect();
   bool isConnected() const;
+  bool shouldClose() const;
   bool isAsync() const;
 
   size_t write(const void *ptr, size_t length);
@@ -155,6 +157,65 @@ private:
   void readThread();
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class WebSocketServer : public TcpServer
+{
+public:
+  typedef TcpServer Base;
+
+  WebSocketServer(int port);
+  virtual ~WebSocketServer();
+
+protected:
+  TcpClient *clientAccept(ConnectionParams *params) override;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class WebSocketClient : public TcpClient
+{
+public:
+  typedef TcpClient Base;
+
+  WebSocketClient(const char *address, int port);
+  WebSocketClient(TcpServer *server, ConnectionParams *params);
+  virtual ~WebSocketClient();
+
+  enum class FrameOpcode : uint8_t
+  {
+    Continuation = 0x00,
+    Text = 0x01,
+    Binary = 0x02,
+    ConnectionClose = 0x08,
+    Ping = 0x09,
+    Pong = 0x0A,
+  };
+
+  struct FrameHeader
+  {
+    bool fin;
+    FrameOpcode opcode;
+    bool masked;
+    uint64_t payloadLength;
+    uint32_t maskingKey;
+  };
+
+protected:
+  size_t asyncWriteHandler(const uint8_t *ptr, size_t length) override;
+  size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
+
+private:
+  bool handshake();
+  void pong();
+  size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
+
+  uint64_t _payloadSize = 0;
+  size_t _continuationBlocks = 0;
+  FrameOpcode _continuationOpcode = FrameOpcode::Continuation;
+  FrameHeader _currentHeader;
+};
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -168,6 +229,7 @@ private:
 #include <vector>
 #include <string>
 #include <mutex>
+#include <condition_variable>
 #include <map>
 
 #ifdef HEADSOCKET_PLATFORM_WINDOWS
@@ -198,6 +260,23 @@ struct LockableValue : M
   T value;
   T *operator->() { return &value; }
   const T *operator->() const { return &value; }
+};
+
+struct Semaphore
+{
+  mutable std::atomic_bool ready;
+  mutable std::mutex mutex;
+  mutable std::condition_variable cv;
+
+  Semaphore() { ready = false; }
+  void lock() const
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]()->bool { return ready; });
+    lock.release();
+  }
+  void unlock() const { ready = false; mutex.unlock(); }
+  void notify() { { std::lock_guard<std::mutex> lock(mutex); ready = true; } cv.notify_one(); }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -268,7 +347,7 @@ void SHA1::processBlock()
 {
   uint32_t w[80], s[] = { 24, 16, 8, 0 };
 
-  for (size_t i = 0, j = 0; i < 64; ++i, j = i % 4) w[i >> 2] = j ? (w[i >> 2] | (_block[i] << s[j])) : (_block[i] << s[j]);
+  for (size_t i = 0, j = 0; i < 64; ++i, j = i % 4) w[i/4] = j ? (w[i/4] | (_block[i] << s[j])) : (_block[i] << s[j]);
   for (size_t i = 16; i < 80; i++) w[i] = rotateLeft((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]), 1);
   Digest32 dig = { _digest[0], _digest[1], _digest[2], _digest[3], _digest[4] };
 
@@ -352,14 +431,15 @@ uint64_t Endian::swap64(uint64_t x)
 struct TcpServerImpl
 {
   std::atomic_bool isRunning;
-  std::atomic_bool isDisconnecting;
   sockaddr_in local;
   LockableValue<std::vector<TcpClient *>> connections;
   int port = 0;
   SOCKET serverSocket = INVALID_SOCKET;
-  std::thread *listenThread = nullptr;
+  std::thread *acceptThread = nullptr;
+  std::thread *disconnectThread = nullptr;
+  Semaphore disconnectSemaphore;
 
-  TcpServerImpl() { isRunning = false; isDisconnecting = false; }
+  TcpServerImpl() { isRunning = false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -391,7 +471,8 @@ TcpServer::TcpServer(int port): _p(new TcpServerImpl())
 
   _p->isRunning = true;
   _p->port = port;
-  _p->listenThread = new std::thread(std::bind(&TcpServer::listenThread, this));
+  _p->acceptThread = new std::thread(std::bind(&TcpServer::acceptThread, this));
+  _p->disconnectThread = new std::thread(std::bind(&TcpServer::disconnectThread, this));
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -422,10 +503,16 @@ void TcpServer::stop()
   {
     closesocket(_p->serverSocket);
 
-    if (_p->listenThread)
+    if (_p->acceptThread)
     {
-      _p->listenThread->join();
-      delete _p->listenThread; _p->listenThread = nullptr;
+      _p->acceptThread->join();
+      delete _p->acceptThread; _p->acceptThread = nullptr;
+    }
+
+    if (_p->disconnectThread)
+    {
+      _p->disconnectThread->join();
+      delete _p->disconnectThread; _p->disconnectThread = nullptr;
     }
   }
 }
@@ -436,18 +523,16 @@ bool TcpServer::isRunning() const { return _p->isRunning; }
 //---------------------------------------------------------------------------------------------------------------------
 void TcpServer::disconnect(TcpClient *client)
 {
-  if (!_p->isDisconnecting.exchange(true))
+  bool found = false;
   {
     HEADSOCKET_LOCK(_p->connections);
-    for (size_t i = 0; i < _p->connections->size(); ++i)
-      if (_p->connections->at(i) == client) { _p->connections->erase(_p->connections->begin() + i); break; }
-  
-    _p->isDisconnecting = false;
+    for (size_t i = 0; i < _p->connections->size() && !found; ++i) if (_p->connections->at(i) == client) found = true;
   }
+  if (found) _p->disconnectSemaphore.notify();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void TcpServer::listenThread()
+void TcpServer::acceptThread()
 {
   while (_p->isRunning)
   {
@@ -463,11 +548,37 @@ void TcpServer::listenThread()
   }
 }
 
+//---------------------------------------------------------------------------------------------------------------------
+void TcpServer::disconnectThread()
+{
+  while (_p->isRunning)
+  {
+    HEADSOCKET_LOCK(_p->disconnectSemaphore);
+    HEADSOCKET_LOCK(_p->connections);
+
+    size_t i = 0;
+    while (i < _p->connections->size())
+    {
+      if (_p->connections->at(i)->shouldClose())
+      {
+        TcpClient *client = _p->connections->at(i);
+        _p->connections->erase(_p->connections->begin() + i);
+        
+        delete client;
+      }
+      else
+        ++i;
+    }
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct TcpClientImpl
 {
   std::atomic_bool isConnected;
+  std::atomic_bool shouldClose;
+  std::atomic_bool isDisconnecting;
   sockaddr_in from;
   LockableValue<std::vector<uint8_t>> writeBuffer;
   std::vector<TcpClient::DataBlock> writeData;
@@ -481,7 +592,7 @@ struct TcpClientImpl
   std::thread *writeThread = nullptr;
   std::thread *readThread = nullptr;
 
-  TcpClientImpl() { isConnected = false; }
+  TcpClientImpl() { isConnected = false; shouldClose = false; isDisconnecting = false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -546,14 +657,16 @@ TcpClient::~TcpClient()
 {
   disconnect();
   delete _p;
+
+  std::cout << "~TcpClient" << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::disconnect()
 {
-  if (_p->isConnected.exchange(false))
+  if (!_p->server && _p->isConnected.exchange(false))
   {
-    if (!_p->server)
+    if (_p->clientSocket != INVALID_SOCKET)
     {
       closesocket(_p->clientSocket);
       _p->clientSocket = INVALID_SOCKET;
@@ -562,7 +675,8 @@ void TcpClient::disconnect()
     if (_p->isAsync)
     {
       _p->isAsync = false;
-      _p->writeThread->join(); _p->readThread->join();
+      _p->writeThread->join();
+      _p->readThread->join();
       delete _p->writeThread; _p->writeThread = nullptr;
       delete _p->readThread; _p->readThread = nullptr;
     }
@@ -571,6 +685,9 @@ void TcpClient::disconnect()
 
 //---------------------------------------------------------------------------------------------------------------------
 bool TcpClient::isConnected() const { return _p->isConnected; }
+
+//---------------------------------------------------------------------------------------------------------------------
+bool TcpClient::shouldClose() const { return _p->shouldClose; }
 
 //---------------------------------------------------------------------------------------------------------------------
 bool TcpClient::isAsync() const { return _p->isAsync; }
@@ -704,14 +821,17 @@ void TcpClient::initAsyncThreads()
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::writeThread()
 {
-  while (_p->isConnected)
+  while (_p->isConnected && !_p->shouldClose)
   {
   
   }
 
-  std::cout << "Write thread closed" << std::endl;
-
-  if (_p->server) _p->server->disconnect(this);
+  if (_p->server && !_p->isDisconnecting.exchange(true))
+  {
+    TcpServer *server = _p->server;
+    _p->server = nullptr;
+    server->disconnect(this);
+  }
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -735,32 +855,259 @@ bool TcpClient::asyncReceivedData(const DataBlock &db) { return false; }
 void TcpClient::readThread()
 {
   std::vector<uint8_t> buffer(1024 * 1024);
-  size_t bufferBytes = 0;
+  size_t bufferBytes = 0, consumed = 0;
 
-  while (_p->isConnected)
+  while (_p->isConnected && !_p->shouldClose)
   {
-    int result = bufferBytes ? bufferBytes : recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
-    if (result == SOCKET_ERROR) break;
-    if (!result && !bufferBytes) break;
+    while (true)
+    {
+      int result = bufferBytes;
 
-    bufferBytes += static_cast<size_t>(result);
-    size_t consumed = asyncReadHandler(buffer.data(), bufferBytes);
+      if (!result || !consumed)
+      {
+        result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
+        if (!result || result == SOCKET_ERROR) return;
+        bufferBytes += static_cast<size_t>(result);
+      }
+      
+      consumed = asyncReadHandler(buffer.data(), bufferBytes);
+      if (!consumed) { if (bufferBytes == buffer.size()) buffer.resize(buffer.size() * 2); }
+      else break;
+    }
+
     if (consumed == InvalidOperation) break;
-    if (consumed > bufferBytes) consumed = bufferBytes;
 
     bufferBytes -= consumed;
-    if (bufferBytes)
+    if (bufferBytes) memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
+  }
+
+  if (_p->server && !_p->isDisconnecting.exchange(true))
+  {
+    TcpServer *server = _p->server;
+    _p->server = nullptr;
+    server->disconnect(this);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------------------------------------------------------------------------------------------------------------
+WebSocketServer::WebSocketServer(int port)
+  : Base(port)
+{
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+WebSocketServer::~WebSocketServer()
+{
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+TcpClient *WebSocketServer::clientAccept(ConnectionParams *params)
+{
+  TcpClient *newClient = new WebSocketClient(this, params);
+  if (!newClient->isConnected())
+  {
+    delete newClient;
+    newClient = nullptr;
+  }
+
+  return newClient;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------------------------------------------------------------------------------------------------------------
+WebSocketClient::WebSocketClient(const char *address, int port) : Base(address, port, true)
+{
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+WebSocketClient::WebSocketClient(TcpServer *server, ConnectionParams *params) : Base(server, params, false)
+{
+  if (isConnected() && !handshake())
+  {
+    disconnect();
+    return;
+  }
+
+  initAsyncThreads();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+WebSocketClient::~WebSocketClient()
+{
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t WebSocketClient::asyncWriteHandler(const uint8_t *ptr, size_t length)
+{
+  HEADSOCKET_LOCK(_p->writeBuffer);
+
+  return length;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
+{
+  uint8_t *cursor = ptr;
+  HEADSOCKET_LOCK(_p->readBuffer);
+  if (!_payloadSize)
+  {
+    size_t headerSize = parseFrameHeader(cursor, length, _currentHeader);
+    if (!headerSize) return 0; else if (headerSize == InvalidOperation) return InvalidOperation;
+    _payloadSize = _currentHeader.payloadLength;
+    cursor += headerSize; length -= headerSize;
+    DataBlock db = { false, false, _p->readBuffer->size(), 0 };
+    _p->readData.push_back(db);
+  }
+
+  if (_payloadSize)
+  {
+    size_t toConsume = length >= static_cast<size_t>(_payloadSize) ? static_cast<size_t>(_payloadSize) : length;
+    if (toConsume)
     {
-      if (consumed)
-        memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
-      else
-        buffer.resize(buffer.size() * 2);
+      _p->readBuffer->resize(_p->readBuffer->size() + toConsume);
+      _p->readData.back().length += toConsume;
+      memcpy(_p->readBuffer->data() + _p->readBuffer->size() - toConsume, cursor, toConsume);
+      _payloadSize -= toConsume;
+      cursor += toConsume; length -= toConsume;
     }
   }
 
-  std::cout << "Read thread closed" << std::endl;
+  if (!_payloadSize)
+  {
+    if (_currentHeader.masked)
+    {
+      DataBlock &db = _p->readData.back();
+      Encoding::xor32(_currentHeader.maskingKey, _p->readBuffer->data() + db.offset, db.length);
+    }
 
-  if (_p->server) _p->server->disconnect(this);
+    if (_currentHeader.fin)
+    {
+      if (_currentHeader.opcode == FrameOpcode::Continuation)
+      {
+        _currentHeader.opcode = _continuationOpcode;
+        DataBlock &db = _p->readData[_p->readData.size() - _continuationBlocks - 1];
+        for (size_t i = 1; i <= _continuationBlocks; ++i)
+          db.length += _p->readData[_p->readData.size() - i].length;
+
+        while (_continuationBlocks--) _p->readData.pop_back();
+        _continuationBlocks = 0;
+      }
+
+      DataBlock &db = _p->readData.back();
+      db.isCompleted = true;
+
+      std::cout << db.length << std::endl;
+
+      switch (_currentHeader.opcode)
+      {
+      case FrameOpcode::Ping: pong(); break;
+      case FrameOpcode::Text:
+      {
+        db.isText = true;
+        _p->readBuffer->push_back(0);
+        ++db.length;
+      }
+      break;
+      case FrameOpcode::ConnectionClose:
+        _p->shouldClose = true;
+        break;
+      }
+
+      if (_currentHeader.opcode == FrameOpcode::Text || _currentHeader.opcode == FrameOpcode::Binary)
+      {
+        if (asyncReceivedData(db))
+        {
+          _p->readBuffer->resize(db.offset);
+          _p->readData.pop_back();
+        }
+      }
+    }
+    else
+    {
+      if (!_continuationBlocks) _continuationOpcode = _currentHeader.opcode;
+      ++_continuationBlocks;
+    }
+  }
+
+  return cursor - ptr;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool WebSocketClient::handshake()
+{
+  std::string key;
+  char lineBuffer[256];
+  while (true)
+  {
+    size_t result = readLine(lineBuffer, 256);
+    if (result <= 1) break;
+    if (!memcmp(lineBuffer, "Sec-WebSocket-Key: ", 19)) key = lineBuffer + 19;
+  }
+
+  if (key.empty()) return false;
+
+  key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+  SHA1 sha; sha.processBytes(key.c_str(), key.length());
+  SHA1::Digest8 digest; sha.getDigestBytes(digest);
+  Encoding::base64(digest, 20, lineBuffer, 256);
+
+  std::string response =
+    "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
+  response += lineBuffer;
+  response += "\n\n";
+
+  write(response.c_str(), response.length());
+  return true;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void WebSocketClient::pong()
+{
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header)
+{
+#define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
+  uint8_t *cursor = ptr;
+  HAVE_ENOUGH_BYTES(2);
+  header.fin = ((*cursor) & 0x80) != 0;
+  header.opcode = static_cast<FrameOpcode>((*cursor++) & 0x0F);
+  header.masked = ((*cursor) & 0x80) != 0;
+
+  uint8_t byte = (*cursor++) & 0x7F;
+  if (byte < 126) header.payloadLength = byte;
+  else if (byte == 126)
+  {
+    HAVE_ENOUGH_BYTES(2);
+    header.payloadLength = Endian::swap16(*(reinterpret_cast<uint16_t *>(cursor)));
+    cursor += 2;
+  }
+  else if (byte == 127)
+  {
+    HAVE_ENOUGH_BYTES(8);
+    header.payloadLength = Endian::swap64(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    cursor += 8;
+  }
+
+  if (header.masked)
+  {
+    HAVE_ENOUGH_BYTES(4);
+    header.maskingKey = *(reinterpret_cast<uint32_t *>(cursor));
+    cursor += 4;
+  }
+
+  return cursor - ptr;
+#undef HAVE_ENOUGH_BYTES
 }
 
 }

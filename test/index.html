@@ -63,8 +63,13 @@ function textInputSend()
 
 function buttonSend1MBJunk()
 {
-	writeToScreen('<span style="color: green;">SENT 1MB of random junk!</span>');
-	websocket.send(new Array(1024).join('@'));
+	writeToScreen('<span style="color: green;">SENT 1 MB of random junk!</span>');
+  websocket.send(new ArrayBuffer(1024 * 1024));
+}
+
+function buttonDisconnect()
+{
+  websocket.close();
 }
 
 window.addEventListener("load", init, false);
@@ -74,6 +79,7 @@ Message:<br />
 <input type="text" id="textInput" style="margin-bottom: 5px; width: 100%;"
 	onkeydown="if (event.keyCode == 13) textInputSend();"
 />
-<input type="button" value="Send 1MB of junk" onclick="buttonSend1MBJunk();" />
+<input type="button" value="Send 1 MB of junk" onclick="buttonSend1MBJunk();" />
+<input type="button" value="Disconnect" onclick="buttonDisconnect();" />
 <hr />
 <div id="output"></div>
