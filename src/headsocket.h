@@ -168,7 +168,7 @@ protected:
   virtual void initAsyncThreads();
   virtual size_t asyncWriteHandler(const uint8_t *ptr, size_t length);
   virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
-  virtual bool asyncReceivedData(const DataBlock &db);
+  virtual bool asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length);
 
   struct TcpClientImpl *_p;
 
@@ -861,7 +861,7 @@ size_t TcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool TcpClient::asyncReceivedData(const DataBlock &db) { return false; }
+bool TcpClient::asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length) { return false; }
 
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::readThread()
@@ -987,8 +987,6 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
       DataBlock &db = _p->readData.back();
       db.isCompleted = true;
 
-      std::cout << db.length << std::endl;
-
       switch (_currentHeader.opcode)
       {
       case FrameOpcode::Ping: pong(); break;
@@ -1006,7 +1004,7 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 
       if (_currentHeader.opcode == FrameOpcode::Text || _currentHeader.opcode == FrameOpcode::Binary)
       {
-        if (asyncReceivedData(db))
+        if (asyncReceivedData(db, _p->readBuffer->data() + db.offset, db.length))
         {
           _p->readBuffer->resize(db.offset);
           _p->readData.pop_back();
