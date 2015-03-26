@@ -28,13 +28,6 @@
 #endif
 #endif
 
-#define HEADSOCKET_SWAP16(value) (((value) >> 8) | ((value) << 8))
-#define HEADSOCKET_SWAP32(value) \
-  ((((value) >> 24) & 0xFF) | \
-  (((value) << 8) & 0xFF0000) | \
-  (((value) >> 8) & 0xFF00) | \
-  (((value) << 24) & 0xFF000000))
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /* Forward declarations */
@@ -86,6 +79,15 @@ struct Encoding
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+struct Endian
+{
+  static uint16_t swap16(uint16_t value);
+  static uint32_t swap32(uint32_t value);
+  static uint64_t swap64(uint64_t value);
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 class TcpServer
 {
 public:
@@ -94,6 +96,8 @@ public:
 
   void stop();
   bool isRunning() const;
+
+  void disconnect(TcpClient *client);
 
 protected:
   virtual TcpClient *clientAccept(ConnectionParams *params);
@@ -111,6 +115,8 @@ private:
 class TcpClient
 {
 public:
+  static const size_t InvalidOperation = (size_t)(-1);
+
   TcpClient(const char *address, int port, bool makeAsync = false);
   TcpClient(TcpServer *server, ConnectionParams *params, bool makeAsync = false);
   virtual ~TcpClient();
@@ -125,10 +131,22 @@ public:
   size_t readLine(void *ptr, size_t length);
   bool forceRead(void *ptr, size_t length);
 
+  struct DataBlock
+  {
+    bool isText;
+    bool isCompleted;
+    size_t offset;
+    size_t length;
+  };
+
+  bool peekReceivedData(DataBlock &db);
+  size_t popReceivedData(void *ptr, size_t length);
+
 protected:
-  void initAsyncThreads();
-  virtual void asyncWriteHandler(const uint8_t *ptr, size_t length);
-  virtual void asyncReadHandler(uint8_t *ptr, size_t length);
+  virtual void initAsyncThreads();
+  virtual size_t asyncWriteHandler(const uint8_t *ptr, size_t length);
+  virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
+  virtual bool asyncReceivedData(const DataBlock &db);
 
   struct TcpClientImpl *_p;
 
@@ -311,16 +329,37 @@ size_t Encoding::xor32(uint32_t key, void *ptr, size_t length)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//---------------------------------------------------------------------------------------------------------------------
+uint16_t Endian::swap16(uint16_t x) { return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8); }
+
+//---------------------------------------------------------------------------------------------------------------------
+uint32_t Endian::swap32(uint32_t x)
+{
+  return ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+uint64_t Endian::swap64(uint64_t x)
+{
+  return
+    ((x & 0x00000000000000FFULL) << 56) | ((x & 0x000000000000FF00ULL) << 40) | ((x & 0x0000000000FF0000ULL) << 24) |
+    ((x & 0x00000000FF000000ULL) << 8)  | ((x & 0x000000FF00000000ULL) >> 8)  | ((x & 0x0000FF0000000000ULL) >> 24) |
+    ((x & 0x00FF000000000000ULL) >> 40) | ((x & 0xFF00000000000000ULL) >> 56);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct TcpServerImpl
 {
   std::atomic_bool isRunning;
+  std::atomic_bool isDisconnecting;
   sockaddr_in local;
   LockableValue<std::vector<TcpClient *>> connections;
   int port = 0;
   SOCKET serverSocket = INVALID_SOCKET;
   std::thread *listenThread = nullptr;
 
-  TcpServerImpl() { isRunning = false; }
+  TcpServerImpl() { isRunning = false; isDisconnecting = false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -395,22 +434,31 @@ void TcpServer::stop()
 bool TcpServer::isRunning() const { return _p->isRunning; }
 
 //---------------------------------------------------------------------------------------------------------------------
+void TcpServer::disconnect(TcpClient *client)
+{
+  if (!_p->isDisconnecting.exchange(true))
+  {
+    HEADSOCKET_LOCK(_p->connections);
+    for (size_t i = 0; i < _p->connections->size(); ++i)
+      if (_p->connections->at(i) == client) { _p->connections->erase(_p->connections->begin() + i); break; }
+  
+    _p->isDisconnecting = false;
+  }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void TcpServer::listenThread()
 {
   while (_p->isRunning)
   {
     ConnectionParams params;
     params.clientSocket = accept(_p->serverSocket, (struct sockaddr *)&params.from, NULL);
-
     if (!_p->isRunning) break;
 
     if (params.clientSocket != INVALID_SOCKET)
     {
       if (TcpClient *newClient = clientAccept(&params))
-      {
-        { HEADSOCKET_LOCK(_p->connections); _p->connections->push_back(newClient); }
-        clientConnected(newClient);
-      }
+      { { HEADSOCKET_LOCK(_p->connections); _p->connections->push_back(newClient); } clientConnected(newClient); }
     }
   }
 }
@@ -421,12 +469,10 @@ struct TcpClientImpl
 {
   std::atomic_bool isConnected;
   sockaddr_in from;
-  CriticalSection writeCS;
-  std::vector<uint8_t> writeBuffer;
-  std::vector<std::tuple<size_t, size_t>> writeSegments;
-  CriticalSection readCS;
-  std::vector<uint8_t> readBuffer;
-  std::vector<std::tuple<size_t, size_t>> readSegments;
+  LockableValue<std::vector<uint8_t>> writeBuffer;
+  std::vector<TcpClient::DataBlock> writeData;
+  LockableValue<std::vector<uint8_t>> readBuffer;
+  std::vector<TcpClient::DataBlock> readData;
   bool isAsync = false;
   TcpServer *server = nullptr;
   SOCKET clientSocket = INVALID_SOCKET;
@@ -585,7 +631,7 @@ size_t TcpClient::readLine(void *ptr, size_t length)
     if (r == SOCKET_ERROR)
       return 0;
     
-    if (r == 0 || ch == '\n')
+    if (r != 1 || ch == '\n')
       break;
 
     if (ch != '\r')
@@ -617,13 +663,40 @@ bool TcpClient::forceRead(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+bool TcpClient::peekReceivedData(DataBlock &db)
+{
+  if (!_p->isAsync) return false;
+
+  HEADSOCKET_LOCK(_p->readBuffer);
+  if (_p->readData.empty() || !_p->readData.front().isCompleted) return false;
+  db = _p->readData.front();
+  return true;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t TcpClient::popReceivedData(void *ptr, size_t length)
+{
+  if (!_p->isAsync || !ptr) return InvalidOperation;
+
+  HEADSOCKET_LOCK(_p->readBuffer);
+  if (_p->readData.empty()) return InvalidOperation;
+
+  DataBlock db = _p->readData.front();
+  size_t consumed = db.length >= length ? length : db.length;
+  memcpy(ptr, _p->readBuffer->data() + db.offset, consumed);
+  _p->readBuffer->erase(_p->readBuffer->begin() + db.offset, _p->readBuffer->begin() + db.offset + consumed);
+  if (db.length == consumed) _p->readData.erase(_p->readData.begin()); else _p->readData.front().length -= consumed;
+  for (auto &b : _p->readData) if (b.offset >= db.offset) b.offset -= consumed;
+
+  return consumed;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void TcpClient::initAsyncThreads()
 {
   _p->isAsync = true;
-  _p->writeBuffer.reserve(65536);
-  _p->writeSegments.reserve(1024);
-  _p->readBuffer.reserve(65536);
-  _p->readSegments.reserve(1024);
+  _p->writeBuffer->reserve(65536);
+  _p->readBuffer->reserve(65536);
   _p->writeThread = new std::thread(std::bind(&TcpClient::writeThread, this));
   _p->readThread = new std::thread(std::bind(&TcpClient::readThread, this));
 }
@@ -637,37 +710,57 @@ void TcpClient::writeThread()
   }
 
   std::cout << "Write thread closed" << std::endl;
+
+  if (_p->server) _p->server->disconnect(this);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void TcpClient::asyncWriteHandler(const uint8_t *ptr, size_t length)
+size_t TcpClient::asyncWriteHandler(const uint8_t *ptr, size_t length)
 {
-  HEADSOCKET_LOCK(_p->writeCS);
-
+  HEADSOCKET_LOCK(_p->writeBuffer);
+  return length;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void TcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
+size_t TcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
 {
-  HEADSOCKET_LOCK(_p->readCS);
-
+  HEADSOCKET_LOCK(_p->readBuffer);
+  return length;
 }
+
+//---------------------------------------------------------------------------------------------------------------------
+bool TcpClient::asyncReceivedData(const DataBlock &db) { return false; }
 
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::readThread()
 {
-  uint8_t buff[1024];
+  std::vector<uint8_t> buffer(1024 * 1024);
+  size_t bufferBytes = 0;
+
   while (_p->isConnected)
   {
-    int result = recv(_p->clientSocket, reinterpret_cast<char *>(buff), 1024, 0);
-    if (!result || result == SOCKET_ERROR)
-      break;
+    int result = bufferBytes ? bufferBytes : recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
+    if (result == SOCKET_ERROR) break;
+    if (!result && !bufferBytes) break;
 
-    std::cout << "Bytes received: " << result << std::endl;
-    asyncReadHandler(buff, static_cast<size_t>(result));
+    bufferBytes += static_cast<size_t>(result);
+    size_t consumed = asyncReadHandler(buffer.data(), bufferBytes);
+    if (consumed == InvalidOperation) break;
+    if (consumed > bufferBytes) consumed = bufferBytes;
+
+    bufferBytes -= consumed;
+    if (bufferBytes)
+    {
+      if (consumed)
+        memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
+      else
+        buffer.resize(buffer.size() * 2);
+    }
   }
 
   std::cout << "Read thread closed" << std::endl;
+
+  if (_p->server) _p->server->disconnect(this);
 }
 
 }

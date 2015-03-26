@@ -1,0 +1,79 @@
+﻿<!DOCTYPE html>
+<meta charset="utf-8" />
+<title>WebSocket Test</title>
+<script language="javascript" type="text/javascript">
+var wsUri = "ws://localhost:42666";
+var websocket = new WebSocket(wsUri);
+var output;
+
+function init()
+{
+	output = document.getElementById("output");
+	testWebSocket();
+}
+
+function testWebSocket()
+{
+	websocket.onopen = function(evt) { onOpen(evt) };
+	websocket.onclose = function(evt) { onClose(evt) };
+	websocket.onmessage = function(evt) { onMessage(evt) };
+	websocket.onerror = function(evt) { onError(evt) };
+}
+
+function onOpen(evt)
+{
+	writeToScreen("CONNECTED: " + wsUri);
+}
+
+function onClose(evt)
+{
+	writeToScreen("DISCONNECTED");
+}
+
+function onMessage(evt)
+{
+	writeToScreen('<span style="color: blue;">RESPONSE: ' + evt.data + '</span>');
+}
+
+function onError(evt)
+{
+	writeToScreen('<span style="color: red;">ERROR:</span> ' + evt.data);
+}
+
+function doSend(message)
+{
+	writeToScreen('<span style="color: green;">SENT: ' + message + '</span>');
+	websocket.send(message);
+}
+
+function writeToScreen(message)
+{
+	var pre = document.createElement("div");
+	pre.style.wordWrap = "break-word";
+	pre.innerHTML = message;
+	output.appendChild(pre);
+}
+
+function textInputSend()
+{
+	var ti = document.getElementById("textInput");
+	doSend(ti.value);
+	ti.value = "";
+}
+
+function buttonSend1MBJunk()
+{
+	writeToScreen('<span style="color: green;">SENT 1MB of random junk!</span>');
+	websocket.send(new Array(1024).join('@'));
+}
+
+window.addEventListener("load", init, false);
+</script>
+
+Message:<br />
+<input type="text" id="textInput" style="margin-bottom: 5px; width: 100%;"
+	onkeydown="if (event.keyCode == 13) textInputSend();"
+/>
+<input type="button" value="Send 1MB of junk" onclick="buttonSend1MBJunk();" />
+<hr />
+<div id="output"></div>
