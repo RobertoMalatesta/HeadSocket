@@ -113,6 +113,26 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+template <typename T>
+class CustomTcpServer : public TcpServer
+{
+public:
+  typedef TcpServer Base;
+
+  CustomTcpServer(int port): Base(port) { }
+  virtual ~CustomTcpServer() { }
+
+protected:
+  TcpClient *clientAccept(ConnectionParams *params) override
+  {
+    TcpClient *newClient = new T(this, params);
+    if (!newClient->isConnected()) { delete newClient; newClient = nullptr; }
+    return newClient;
+  }
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 class TcpClient
 {
 public:
@@ -159,20 +179,6 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class WebSocketServer : public TcpServer
-{
-public:
-  typedef TcpServer Base;
-
-  WebSocketServer(int port);
-  virtual ~WebSocketServer();
-
-protected:
-  TcpClient *clientAccept(ConnectionParams *params) override;
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 class WebSocketClient : public TcpClient
 {
 public:
@@ -215,6 +221,10 @@ private:
   FrameOpcode _continuationOpcode = FrameOpcode::Continuation;
   FrameHeader _currentHeader;
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+typedef CustomTcpServer<WebSocketClient> WebSocketServer;
 
 }
 
@@ -889,34 +899,6 @@ void TcpClient::readThread()
     _p->server = nullptr;
     server->disconnect(this);
   }
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-//---------------------------------------------------------------------------------------------------------------------
-WebSocketServer::WebSocketServer(int port)
-  : Base(port)
-{
-
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-WebSocketServer::~WebSocketServer()
-{
-
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-TcpClient *WebSocketServer::clientAccept(ConnectionParams *params)
-{
-  TcpClient *newClient = new WebSocketClient(this, params);
-  if (!newClient->isConnected())
-  {
-    delete newClient;
-    newClient = nullptr;
-  }
-
-  return newClient;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
