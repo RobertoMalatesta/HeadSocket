@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="headsocket.h" />
+    <ClInclude Include="inc\Encoding.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Endian.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SHA1.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\TcpClient.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\TcpServer.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\WebSocketClient.h">
+      <Filter>inc</Filter>
+    </ClInclude>
+    <ClInclude Include="hs.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="inc">
+      <UniqueIdentifier>{9a3e7473-fa43-4c00-b054-8a677d9ad650}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="inc\Encoding.inl">
+      <Filter>inc</Filter>
+    </None>
+    <None Include="inc\Endian.inl">
+      <Filter>inc</Filter>
+    </None>
+    <None Include="inc\SHA1.inl">
+      <Filter>inc</Filter>
+    </None>
+    <None Include="inc\TcpClient.inl">
+      <Filter>inc</Filter>
+    </None>
+    <None Include="inc\TcpServer.inl">
+      <Filter>inc</Filter>
+    </None>
+    <None Include="inc\WebSocketClient.inl">
+      <Filter>inc</Filter>
+    </None>
+  </ItemGroup>
+</Project>

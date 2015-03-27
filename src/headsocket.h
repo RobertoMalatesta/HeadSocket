@@ -161,12 +161,14 @@ public:
     size_t length;
   };
 
-  bool peekReceivedData(DataBlock &db);
-  size_t popReceivedData(void *ptr, size_t length);
+  void pushData(const void *ptr, size_t length, bool isText = false);
+  void pushData(const char *text);
+  bool peekData(DataBlock &db);
+  size_t popData(void *ptr, size_t length);
 
 protected:
   virtual void initAsyncThreads();
-  virtual size_t asyncWriteHandler(const uint8_t *ptr, size_t length);
+  virtual size_t asyncWriteHandler(uint8_t *ptr, size_t length);
   virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
   virtual bool asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length);
 
@@ -208,13 +210,14 @@ public:
   };
 
 protected:
-  size_t asyncWriteHandler(const uint8_t *ptr, size_t length) override;
+  size_t asyncWriteHandler(uint8_t *ptr, size_t length) override;
   size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
 
 private:
   bool handshake();
   void pong();
   size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
+  size_t writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
 
   uint64_t _payloadSize = 0;
   size_t _continuationBlocks = 0;
@@ -274,19 +277,20 @@ struct LockableValue : M
 
 struct Semaphore
 {
-  mutable std::atomic_bool ready;
+  mutable std::atomic_size_t count;
   mutable std::mutex mutex;
   mutable std::condition_variable cv;
 
-  Semaphore() { ready = false; }
+  Semaphore() { count = 0; }
   void lock() const
   {
     std::unique_lock<std::mutex> lock(mutex);
-    cv.wait(lock, [&]()->bool { return ready; });
+    cv.wait(lock, [&]()->bool { return count > 0; });
     lock.release();
   }
-  void unlock() const { ready = false; mutex.unlock(); }
-  void notify() { { std::lock_guard<std::mutex> lock(mutex); ready = true; } cv.notify_one(); }
+  void unlock() const { if (count) --count; mutex.unlock(); }
+  void notify() { { std::lock_guard<std::mutex> lock(mutex); ++count; } cv.notify_one(); }
+  bool consume() const { if (count) { --count; return true; } return false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -557,8 +561,9 @@ void TcpServer::acceptThread()
 
     if (params.clientSocket != INVALID_SOCKET)
     {
+      HEADSOCKET_LOCK(_p->connections);
       if (TcpClient *newClient = clientAccept(&params))
-      { { HEADSOCKET_LOCK(_p->connections); _p->connections->push_back(newClient); } clientConnected(newClient); }
+      { _p->connections->push_back(newClient); clientConnected(newClient); }
     }
   }
 }
@@ -594,6 +599,7 @@ struct TcpClientImpl
   std::atomic_bool shouldClose;
   std::atomic_bool isDisconnecting;
   sockaddr_in from;
+  Semaphore writeSemaphore;
   LockableValue<std::vector<uint8_t>> writeBuffer;
   std::vector<TcpClient::DataBlock> writeData;
   LockableValue<std::vector<uint8_t>> readBuffer;
@@ -687,6 +693,7 @@ void TcpClient::disconnect()
     if (_p->isAsync)
     {
       _p->isAsync = false;
+      _p->writeSemaphore.notify();
       _p->writeThread->join();
       _p->readThread->join();
       delete _p->writeThread; _p->writeThread = nullptr;
@@ -707,10 +714,10 @@ bool TcpClient::isAsync() const { return _p->isAsync; }
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::write(const void *ptr, size_t length)
 {
+  if (_p->isAsync) return InvalidOperation;
   if (!ptr || !length) return 0;
   int result = send(_p->clientSocket, (const char *)ptr, length, 0);
-  if (result == SOCKET_ERROR)
-    return 0;
+  if (!result || result == SOCKET_ERROR) return 0;
 
   return static_cast<size_t>(result);
 }
@@ -718,6 +725,7 @@ size_t TcpClient::write(const void *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 bool TcpClient::forceWrite(const void *ptr, size_t length)
 {
+  if (_p->isAsync) return false;
   if (!ptr) return true;
 
   const char *chPtr = (const char *)ptr;
@@ -725,8 +733,7 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
   while (length)
   {
     int result = send(_p->clientSocket, chPtr, length, 0);
-    if (result == SOCKET_ERROR)
-      return false;
+    if (!result || result == SOCKET_ERROR) return false;
 
     length -= (size_t)result;
     chPtr += result;
@@ -738,10 +745,10 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::read(void *ptr, size_t length)
 {
+  if (_p->isAsync) return InvalidOperation;
   if (!ptr || !length) return 0;
   int result = recv(_p->clientSocket, (char *)ptr, length, 0);
-  if (result == SOCKET_ERROR)
-    return 0;
+  if (!result || result == SOCKET_ERROR) return 0;
 
   return static_cast<size_t>(result);
 }
@@ -749,6 +756,7 @@ size_t TcpClient::read(void *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::readLine(void *ptr, size_t length)
 {
+  if (_p->isAsync) return InvalidOperation;
   if (!ptr || !length) return 0;
 
   size_t result = 0;
@@ -756,15 +764,10 @@ size_t TcpClient::readLine(void *ptr, size_t length)
   {
     char ch;
     int r = recv(_p->clientSocket, &ch, 1, 0);
+    if (!r || r == SOCKET_ERROR) return 0;
     
-    if (r == SOCKET_ERROR)
-      return 0;
-    
-    if (r != 1 || ch == '\n')
-      break;
-
-    if (ch != '\r')
-      reinterpret_cast<char *>(ptr)[result++] = ch;
+    if (r != 1 || ch == '\n') break;
+    if (ch != '\r') reinterpret_cast<char *>(ptr)[result++] = ch;
   }
 
   reinterpret_cast<char *>(ptr)[result++] = 0;
@@ -774,25 +777,41 @@ size_t TcpClient::readLine(void *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 bool TcpClient::forceRead(void *ptr, size_t length)
 {
+  if (_p->isAsync) return false;
   if (!ptr) return true;
 
   char *chPtr = (char *)ptr;
-
   while (length)
   {
     int result = recv(_p->clientSocket, chPtr, length, 0);
-    if (result == SOCKET_ERROR)
-      return false;
+    if (!result || result == SOCKET_ERROR) return false;
 
-    length -= (size_t)result;
-    chPtr += result;
+    length -= (size_t)result; chPtr += result;
   }
 
   return true;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool TcpClient::peekReceivedData(DataBlock &db)
+void TcpClient::pushData(const void *ptr, size_t length, bool isText)
+{
+  if (!_p->isAsync || !ptr || !length) return;
+
+  {
+    HEADSOCKET_LOCK(_p->writeBuffer);
+    DataBlock db = { true, true, _p->writeBuffer->size(), length };
+    _p->writeData.push_back(db);
+    _p->writeBuffer->resize(_p->writeBuffer->size() + length);
+    memcpy(_p->writeBuffer->data() + _p->writeBuffer->size() - length, ptr, length);
+  }
+  _p->writeSemaphore.notify();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void TcpClient::pushData(const char *text) { pushData(text, text ? strlen(text) : 0, true); }
+
+//---------------------------------------------------------------------------------------------------------------------
+bool TcpClient::peekData(DataBlock &db)
 {
   if (!_p->isAsync) return false;
 
@@ -803,9 +822,10 @@ bool TcpClient::peekReceivedData(DataBlock &db)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::popReceivedData(void *ptr, size_t length)
+size_t TcpClient::popData(void *ptr, size_t length)
 {
   if (!_p->isAsync || !ptr) return InvalidOperation;
+  if (!length) return 0;
 
   HEADSOCKET_LOCK(_p->readBuffer);
   if (_p->readData.empty()) return InvalidOperation;
@@ -833,9 +853,24 @@ void TcpClient::initAsyncThreads()
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::writeThread()
 {
+  std::vector<uint8_t> buffer(1024 * 1024);
+
   while (_p->isConnected && !_p->shouldClose)
   {
-  
+    bool hadError = false;
+    HEADSOCKET_LOCK(_p->writeSemaphore);
+    while (_p->writeSemaphore.consume())
+    {
+      size_t written = asyncWriteHandler(buffer.data(), buffer.size());
+      if (written == InvalidOperation) { hadError = true; break; }
+      if (!written) buffer.resize(buffer.size() * 2);
+      else
+      {
+        int result = send(_p->clientSocket, reinterpret_cast<const char *>(buffer.data()), written, 0);
+        if (!result || result == SOCKET_ERROR) { hadError = true; break; }
+      }
+    }
+    if (hadError) break;
   }
 
   if (_p->server && !_p->isDisconnecting.exchange(true))
@@ -847,7 +882,7 @@ void TcpClient::writeThread()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::asyncWriteHandler(const uint8_t *ptr, size_t length)
+size_t TcpClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 {
   HEADSOCKET_LOCK(_p->writeBuffer);
   return length;
@@ -874,7 +909,6 @@ void TcpClient::readThread()
     while (true)
     {
       int result = bufferBytes;
-
       if (!result || !consumed)
       {
         result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
@@ -886,9 +920,7 @@ void TcpClient::readThread()
       if (!consumed) { if (bufferBytes == buffer.size()) buffer.resize(buffer.size() * 2); }
       else break;
     }
-
     if (consumed == InvalidOperation) break;
-
     bufferBytes -= consumed;
     if (bufferBytes) memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
   }
@@ -904,7 +936,7 @@ void TcpClient::readThread()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::WebSocketClient(const char *address, int port) : Base(address, port, true)
+WebSocketClient::WebSocketClient(const char *address, int port) : Base(address, port, false)
 {
 
 }
@@ -928,11 +960,25 @@ WebSocketClient::~WebSocketClient()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t WebSocketClient::asyncWriteHandler(const uint8_t *ptr, size_t length)
+size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 {
+  uint8_t *cursor = ptr;
   HEADSOCKET_LOCK(_p->writeBuffer);
-
-  return length;
+  DataBlock db = _p->writeData.front();
+  if (db.length + 16 > length) return 0;
+  
+  FrameHeader header;
+  header.fin = true;
+  header.opcode = db.isText ? FrameOpcode::Text : FrameOpcode::Binary;
+  header.masked = false;
+  header.payloadLength = db.length;
+  size_t headerSize = writeFrameHeader(cursor, length, header);
+  cursor += headerSize; length -= headerSize;
+  memcpy(cursor, _p->writeBuffer->data() + db.offset, db.length);
+  cursor += db.length;
+  
+  _p->writeData.erase(_p->writeData.begin());
+  return cursor - ptr;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1057,15 +1103,15 @@ void WebSocketClient::pong()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+#define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
 size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header)
 {
-#define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
   uint8_t *cursor = ptr;
   HAVE_ENOUGH_BYTES(2);
   header.fin = ((*cursor) & 0x80) != 0;
   header.opcode = static_cast<FrameOpcode>((*cursor++) & 0x0F);
-  header.masked = ((*cursor) & 0x80) != 0;
 
+  header.masked = ((*cursor) & 0x80) != 0;
   uint8_t byte = (*cursor++) & 0x7F;
   if (byte < 126) header.payloadLength = byte;
   else if (byte == 126)
@@ -1089,8 +1135,46 @@ size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   }
 
   return cursor - ptr;
-#undef HAVE_ENOUGH_BYTES
 }
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t WebSocketClient::writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header)
+{
+  uint8_t *cursor = ptr;
+  HAVE_ENOUGH_BYTES(2);
+  *cursor = header.fin ? 0x80 : 0x00;
+  *cursor++ |= static_cast<uint8_t>(header.opcode);
+
+  *cursor = header.masked ? 0x80 : 0x00;
+  if (header.payloadLength < 126)
+  {
+    *cursor++ |= static_cast<uint8_t>(header.payloadLength);
+  }
+  else if (header.payloadLength < 65536)
+  {
+    HAVE_ENOUGH_BYTES(2);
+    *cursor++ |= 126;
+    *reinterpret_cast<uint16_t *>(cursor) = Endian::swap16(static_cast<uint16_t>(header.payloadLength));
+    cursor += 2;
+  }
+  else
+  {
+    HAVE_ENOUGH_BYTES(8);
+    *cursor++ |= 127;
+    *reinterpret_cast<uint64_t *>(cursor) = Endian::swap64(header.payloadLength);
+    cursor += 8;
+  }
+
+  if (header.masked)
+  {
+    HAVE_ENOUGH_BYTES(4);
+    *reinterpret_cast<uint32_t *>(cursor) = header.maskingKey;
+    cursor += 4;
+  }
+
+  return cursor - ptr;
+}
+#undef HAVE_ENOUGH_BYTES
 
 }
 #endif

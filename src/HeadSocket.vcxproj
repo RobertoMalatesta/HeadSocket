@@ -80,6 +80,21 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="headsocket.h" />
+    <ClInclude Include="hs.h" />
+    <ClInclude Include="inc\Encoding.h" />
+    <ClInclude Include="inc\Endian.h" />
+    <ClInclude Include="inc\SHA1.h" />
+    <ClInclude Include="inc\TcpClient.h" />
+    <ClInclude Include="inc\TcpServer.h" />
+    <ClInclude Include="inc\WebSocketClient.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="inc\Encoding.inl" />
+    <None Include="inc\Endian.inl" />
+    <None Include="inc\SHA1.inl" />
+    <None Include="inc\TcpClient.inl" />
+    <None Include="inc\TcpServer.inl" />
+    <None Include="inc\WebSocketClient.inl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

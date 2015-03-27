@@ -14,9 +14,15 @@ protected:
   bool asyncReceivedData(const TcpClient::DataBlock &db, uint8_t *ptr, size_t length) override
   {
     if (db.isText)
+    {
       std::cout << "Message: " << reinterpret_cast<const char *>(ptr) << std::endl;
+      pushData("Thank you for this beautiful text message!");
+    }
     else
+    {
       std::cout << "Data: " << length << " bytes" << std::endl;
+      pushData("Thank you for these fresh bytes!");
+    }
 
     return true;
   }
@@ -35,6 +41,8 @@ protected:
   void clientConnected(headsocket::TcpClient *client) override
   {
     std::cout << "Client connected!" << std::endl;
+
+    client->pushData("Hello!");
   }
 
   void clientDisconnected(headsocket::TcpClient *client) override
