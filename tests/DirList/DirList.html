@@ -1,0 +1,143 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DirList HeadSocket example</title>
+  <style>
+    body {
+      background-color: #808080;
+      font: 13px monospace;
+      color: #808080;
+    }
+    a {
+      text-decoration: none;
+    }
+    div#content {
+      width: 640px;
+      padding: 0px 0px;
+      background-color: #000080;
+      border: 1px solid #FFFFFF;
+      margin-left: auto;
+      margin-right: auto;
+      box-shadow: 0px 0px 15px #000000;
+    }
+    div.fileItem {
+      padding: 1px;
+    }
+    div.fileItem:hover {
+      background-color: #0000FF;
+      color: #FFFF00;
+      cursor: pointer;
+    }
+    div.dirItem {
+      color: #FFFFFF;
+    }
+    div.textLine {
+      padding: 1px;
+      background-color: #A0A0A0;
+      color: #000000;
+    }
+    div.size {
+      float: right;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">
+
+  </div>
+</body>
+</html>
+
+<script language="javascript" type="text/javascript">
+  var content = document.getElementById("content");
+  var uri = "ws://localhost:42666";
+  var data;
+  var ws;
+
+  function onOpen(e) {
+    ws.send("dir");
+  }
+  
+  function onClose(e) {
+    clearList();
+    createTextLine("Connection closed!");
+  }
+  
+  function onError(e) {
+    clearList();
+    createTextLine("Error: " + e.data);
+  }
+
+  function onMessage(e) {
+    data = JSON.parse(e.data);
+    var count = data.count;
+
+    // Clear all existing HTML file items
+    clearList();
+    
+    createTextLine(data.dir);
+
+    // List directories first
+    for (var i = 0; i < count; ++i) {
+      var record = data[i];
+
+      if (record.isDirectory) {
+        var item = createFileItemElement(record.filename, "&lt;DIR&gt;");
+        item.classList.add("dirItem");
+        item.onclick = createChangeDirHandler(i);
+      }
+    }
+
+    // List files
+    for (var i = 0; i < count; ++i) {
+      var record = data[i];
+
+      if (!record.isDirectory) {
+        createFileItemElement(record.filename, record.size.toString());
+      }
+    }
+  }
+
+  function clearList() {
+    while (content.firstChild)
+      content.removeChild(content.firstChild);
+  }
+  
+  function createFileItemElement(filename, size) {
+    var item = document.createElement("div");
+    item.classList.add("fileItem");
+    item.innerHTML = filename + '<div class="size">' + size + '</div>';
+    content.appendChild(item);
+    
+    return item;
+  }
+
+  function createTextLine(text) {
+    var item = document.createElement("div");
+    item.classList.add("textLine");
+    item.innerHTML = text;
+    content.appendChild(item);
+    
+    return item;
+  }  
+  
+  function createChangeDirHandler(i) {
+    return function () { changeDir(i); }
+  }
+  
+  function changeDir(i) {
+    ws.send("cd " + data[i].filename);
+    ws.send("dir");
+  }
+
+  function main() {
+    ws = new WebSocket(uri);
+    ws.onopen = function (e) { onOpen(e); }
+    ws.onclose = function (e) { onClose(e); }
+    ws.onerror = function (e) { onError(e); }
+    ws.onmessage = function (e) { onMessage(e); }
+  }
+
+  window.addEventListener("load", main, false);
+</script>
