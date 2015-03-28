@@ -88,6 +88,21 @@ struct Endian
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+enum class Opcode { Continuation = 0x00, Text = 0x01, Binary = 0x02, ConnectionClose = 0x08, Ping = 0x09, Pong = 0x0A };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct DataBlock
+{
+  Opcode opcode;
+  bool isCompleted;
+  size_t offset;
+  size_t length;
+  DataBlock(Opcode op, size_t off) : opcode(op), isCompleted(false), offset(off), length(0) { }
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 class TcpServer
 {
 public:
@@ -153,17 +168,9 @@ public:
   size_t readLine(void *ptr, size_t length);
   bool forceRead(void *ptr, size_t length);
 
-  struct DataBlock
-  {
-    bool isText;
-    bool isCompleted;
-    size_t offset;
-    size_t length;
-  };
-
-  void pushData(const void *ptr, size_t length, bool isText = false);
+  void pushData(const void *ptr, size_t length, Opcode op = Opcode::Binary);
   void pushData(const char *text);
-  bool peekData(DataBlock &db);
+  size_t peekData(Opcode *op = nullptr) const;
   size_t popData(void *ptr, size_t length);
 
 protected:
@@ -177,6 +184,7 @@ protected:
 private:
   void writeThread();
   void readThread();
+  void exitThreads();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -184,28 +192,20 @@ private:
 class WebSocketClient : public TcpClient
 {
 public:
+  static const size_t FrameSizeLimit = 128 * 1024;
+
   typedef TcpClient Base;
 
   WebSocketClient(const char *address, int port);
   WebSocketClient(TcpServer *server, ConnectionParams *params);
   virtual ~WebSocketClient();
 
-  enum class FrameOpcode : uint8_t
-  {
-    Continuation = 0x00,
-    Text = 0x01,
-    Binary = 0x02,
-    ConnectionClose = 0x08,
-    Ping = 0x09,
-    Pong = 0x0A,
-  };
-
   struct FrameHeader
   {
     bool fin;
-    FrameOpcode opcode;
+    Opcode opcode;
     bool masked;
-    uint64_t payloadLength;
+    size_t payloadLength;
     uint32_t maskingKey;
   };
 
@@ -215,13 +215,10 @@ protected:
 
 private:
   bool handshake();
-  void pong();
   size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
   size_t writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
 
-  uint64_t _payloadSize = 0;
-  size_t _continuationBlocks = 0;
-  FrameOpcode _continuationOpcode = FrameOpcode::Continuation;
+  size_t _payloadSize = 0;
   FrameHeader _currentHeader;
 };
 
@@ -282,15 +279,55 @@ struct Semaphore
   mutable std::condition_variable cv;
 
   Semaphore() { count = 0; }
+
   void lock() const
   {
     std::unique_lock<std::mutex> lock(mutex);
     cv.wait(lock, [&]()->bool { return count > 0; });
     lock.release();
   }
-  void unlock() const { if (count) --count; mutex.unlock(); }
+  void unlock() { mutex.unlock(); }
   void notify() { { std::lock_guard<std::mutex> lock(mutex); ++count; } cv.notify_one(); }
-  bool consume() const { if (count) { --count; return true; } return false; }
+  void consume() const { if (count) --count; }
+};
+
+struct DataBlockBuffer
+{
+  std::vector<DataBlock> blocks;
+  std::vector<uint8_t> buffer;
+
+  DataBlockBuffer() { buffer.reserve(65536); }
+  DataBlock &blockBegin(Opcode op) { blocks.emplace_back(op, buffer.size()); return blocks.back(); }
+  DataBlock &blockEnd() { blocks.back().isCompleted = true; return blocks.back(); }
+  void blockRemove()
+  {
+    if (blocks.empty()) return;
+    buffer.resize(blocks.back().offset);
+    blocks.pop_back();
+  }
+  void writeData(const void *ptr, size_t length)
+  {
+    buffer.resize(buffer.size() + length);
+    memcpy(buffer.data() + buffer.size() - length, reinterpret_cast<const char *>(ptr), length);
+    blocks.back().length += length;
+  }
+  size_t readData(void *ptr, size_t length)
+  {
+    if (!ptr || !length || blocks.empty() || !blocks.front().isCompleted) return 0;
+    DataBlock &db = blocks.front();
+    size_t result = db.length >= length ? length : db.length;
+    memcpy(ptr, buffer.data() + db.offset, result);
+    buffer.erase(buffer.begin(), buffer.begin() + result);
+    if (!(db.length -= result)) blocks.erase(blocks.begin()); else blocks.front().opcode = Opcode::Continuation;
+    for (auto &block : blocks) if (block.offset > db.offset) block.offset -= result;
+    return result;
+  }
+  size_t peekData(Opcode *op = nullptr) const
+  {
+    if (blocks.empty() || !blocks.front().isCompleted) return 0;
+    if (op) *op = blocks.front().opcode;
+    return blocks.front().length;
+  }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -600,10 +637,8 @@ struct TcpClientImpl
   std::atomic_bool isDisconnecting;
   sockaddr_in from;
   Semaphore writeSemaphore;
-  LockableValue<std::vector<uint8_t>> writeBuffer;
-  std::vector<TcpClient::DataBlock> writeData;
-  LockableValue<std::vector<uint8_t>> readBuffer;
-  std::vector<TcpClient::DataBlock> readData;
+  LockableValue<DataBlockBuffer> writeBlocks;
+  LockableValue<DataBlockBuffer> readBlocks;
   bool isAsync = false;
   TcpServer *server = nullptr;
   SOCKET clientSocket = INVALID_SOCKET;
@@ -793,32 +828,29 @@ bool TcpClient::forceRead(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void TcpClient::pushData(const void *ptr, size_t length, bool isText)
+void TcpClient::pushData(const void *ptr, size_t length, Opcode op)
 {
   if (!_p->isAsync || !ptr || !length) return;
 
   {
-    HEADSOCKET_LOCK(_p->writeBuffer);
-    DataBlock db = { true, true, _p->writeBuffer->size(), length };
-    _p->writeData.push_back(db);
-    _p->writeBuffer->resize(_p->writeBuffer->size() + length);
-    memcpy(_p->writeBuffer->data() + _p->writeBuffer->size() - length, ptr, length);
+    HEADSOCKET_LOCK(_p->writeBlocks);
+    _p->writeBlocks->blockBegin(op);
+    _p->writeBlocks->writeData(ptr, length);
+    _p->writeBlocks->blockEnd();
   }
   _p->writeSemaphore.notify();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void TcpClient::pushData(const char *text) { pushData(text, text ? strlen(text) : 0, true); }
+void TcpClient::pushData(const char *text) { pushData(text, text ? strlen(text) : 0, Opcode::Text); }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool TcpClient::peekData(DataBlock &db)
+size_t TcpClient::peekData(Opcode *op) const
 {
-  if (!_p->isAsync) return false;
+  if (!_p->isAsync) return 0;
 
-  HEADSOCKET_LOCK(_p->readBuffer);
-  if (_p->readData.empty() || !_p->readData.front().isCompleted) return false;
-  db = _p->readData.front();
-  return true;
+  HEADSOCKET_LOCK(_p->readBlocks);
+  return _p->readBlocks->peekData(op);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -827,25 +859,14 @@ size_t TcpClient::popData(void *ptr, size_t length)
   if (!_p->isAsync || !ptr) return InvalidOperation;
   if (!length) return 0;
 
-  HEADSOCKET_LOCK(_p->readBuffer);
-  if (_p->readData.empty()) return InvalidOperation;
-
-  DataBlock db = _p->readData.front();
-  size_t consumed = db.length >= length ? length : db.length;
-  memcpy(ptr, _p->readBuffer->data() + db.offset, consumed);
-  _p->readBuffer->erase(_p->readBuffer->begin() + db.offset, _p->readBuffer->begin() + db.offset + consumed);
-  if (db.length == consumed) _p->readData.erase(_p->readData.begin()); else _p->readData.front().length -= consumed;
-  for (auto &b : _p->readData) if (b.offset >= db.offset) b.offset -= consumed;
-
-  return consumed;
+  HEADSOCKET_LOCK(_p->readBlocks);
+  return _p->readBlocks->readData(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 void TcpClient::initAsyncThreads()
 {
   _p->isAsync = true;
-  _p->writeBuffer->reserve(65536);
-  _p->readBuffer->reserve(65536);
   _p->writeThread = new std::thread(std::bind(&TcpClient::writeThread, this));
   _p->readThread = new std::thread(std::bind(&TcpClient::readThread, this));
 }
@@ -854,44 +875,41 @@ void TcpClient::initAsyncThreads()
 void TcpClient::writeThread()
 {
   std::vector<uint8_t> buffer(1024 * 1024);
-
   while (_p->isConnected && !_p->shouldClose)
   {
-    bool hadError = false;
-    HEADSOCKET_LOCK(_p->writeSemaphore);
-    while (_p->writeSemaphore.consume())
+    size_t written = 0;
     {
-      size_t written = asyncWriteHandler(buffer.data(), buffer.size());
-      if (written == InvalidOperation) { hadError = true; break; }
-      if (!written) buffer.resize(buffer.size() * 2);
-      else
+      HEADSOCKET_LOCK(_p->writeSemaphore);
+      written = asyncWriteHandler(buffer.data(), buffer.size());
+    }
+    if (written == InvalidOperation) break;
+    if (!written) buffer.resize(buffer.size() * 2);
+    else
+    {
+      const char *cursor = reinterpret_cast<const char *>(buffer.data());
+      while (written)
       {
-        int result = send(_p->clientSocket, reinterpret_cast<const char *>(buffer.data()), written, 0);
-        if (!result || result == SOCKET_ERROR) { hadError = true; break; }
+        int result = send(_p->clientSocket, cursor, written, 0);
+        if (!result || result == SOCKET_ERROR) break;
+        cursor += result;
+        written -= static_cast<size_t>(result);
       }
     }
-    if (hadError) break;
   }
-
-  if (_p->server && !_p->isDisconnecting.exchange(true))
-  {
-    TcpServer *server = _p->server;
-    _p->server = nullptr;
-    server->disconnect(this);
-  }
+  exitThreads();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 {
-  HEADSOCKET_LOCK(_p->writeBuffer);
+  HEADSOCKET_LOCK(_p->writeBlocks);
   return length;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
 {
-  HEADSOCKET_LOCK(_p->readBuffer);
+  HEADSOCKET_LOCK(_p->readBlocks);
   return length;
 }
 
@@ -908,11 +926,11 @@ void TcpClient::readThread()
   {
     while (true)
     {
-      int result = bufferBytes;
+      int result = static_cast<size_t>(bufferBytes);
       if (!result || !consumed)
       {
         result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
-        if (!result || result == SOCKET_ERROR) return;
+        if (!result || result == SOCKET_ERROR) { consumed = InvalidOperation; break; }
         bufferBytes += static_cast<size_t>(result);
       }
       
@@ -924,7 +942,12 @@ void TcpClient::readThread()
     bufferBytes -= consumed;
     if (bufferBytes) memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
   }
+  exitThreads();
+}
 
+//---------------------------------------------------------------------------------------------------------------------
+void TcpClient::exitThreads()
+{
   if (_p->server && !_p->isDisconnecting.exchange(true))
   {
     TcpServer *server = _p->server;
@@ -963,21 +986,30 @@ WebSocketClient::~WebSocketClient()
 size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 {
   uint8_t *cursor = ptr;
-  HEADSOCKET_LOCK(_p->writeBuffer);
-  DataBlock db = _p->writeData.front();
-  if (db.length + 16 > length) return 0;
-  
-  FrameHeader header;
-  header.fin = true;
-  header.opcode = db.isText ? FrameOpcode::Text : FrameOpcode::Binary;
-  header.masked = false;
-  header.payloadLength = db.length;
-  size_t headerSize = writeFrameHeader(cursor, length, header);
-  cursor += headerSize; length -= headerSize;
-  memcpy(cursor, _p->writeBuffer->data() + db.offset, db.length);
-  cursor += db.length;
-  
-  _p->writeData.erase(_p->writeData.begin());
+  HEADSOCKET_LOCK(_p->writeBlocks);
+  while (length >= 16)
+  {
+    Opcode op;
+    size_t toWrite = _p->writeBlocks->peekData(&op);
+    if (!toWrite) break;
+    
+    size_t toConsume = (length - 15) > FrameSizeLimit ? FrameSizeLimit : (length - 15);
+    toConsume = toConsume > toWrite ? toWrite : toConsume;
+    
+    FrameHeader header;
+    header.fin = (toWrite - toConsume) == 0;
+    header.opcode = op;
+    header.masked = false;
+    header.payloadLength = toConsume;
+
+    size_t headerSize = writeFrameHeader(cursor, length, header);
+    cursor += headerSize; length -= headerSize;
+    _p->writeBlocks->readData(cursor, toConsume);
+    cursor += toConsume; length -= toConsume;
+
+    if (header.fin) _p->writeSemaphore.consume();
+  }
+
   return cursor - ptr;
 }
 
@@ -985,25 +1017,24 @@ size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 {
   uint8_t *cursor = ptr;
-  HEADSOCKET_LOCK(_p->readBuffer);
+  HEADSOCKET_LOCK(_p->readBlocks);
   if (!_payloadSize)
   {
+    Opcode prevOpcode = _currentHeader.opcode;
     size_t headerSize = parseFrameHeader(cursor, length, _currentHeader);
     if (!headerSize) return 0; else if (headerSize == InvalidOperation) return InvalidOperation;
     _payloadSize = _currentHeader.payloadLength;
     cursor += headerSize; length -= headerSize;
-    DataBlock db = { false, false, _p->readBuffer->size(), 0 };
-    _p->readData.push_back(db);
+    if (_currentHeader.opcode != Opcode::Continuation) _p->readBlocks->blockBegin(_currentHeader.opcode);
+    else _currentHeader.opcode = prevOpcode;
   }
 
   if (_payloadSize)
   {
-    size_t toConsume = length >= static_cast<size_t>(_payloadSize) ? static_cast<size_t>(_payloadSize) : length;
+    size_t toConsume = length >= _payloadSize ? _payloadSize : length;
     if (toConsume)
     {
-      _p->readBuffer->resize(_p->readBuffer->size() + toConsume);
-      _p->readData.back().length += toConsume;
-      memcpy(_p->readBuffer->data() + _p->readBuffer->size() - toConsume, cursor, toConsume);
+      _p->readBlocks->writeData(cursor, toConsume);
       _payloadSize -= toConsume;
       cursor += toConsume; length -= toConsume;
     }
@@ -1013,54 +1044,23 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
   {
     if (_currentHeader.masked)
     {
-      DataBlock &db = _p->readData.back();
-      Encoding::xor32(_currentHeader.maskingKey, _p->readBuffer->data() + db.offset, db.length);
+      DataBlock &db = _p->readBlocks->blocks.back();
+      size_t len = _currentHeader.payloadLength;
+      Encoding::xor32(_currentHeader.maskingKey, _p->readBlocks->buffer.data() + _p->readBlocks->buffer.size() - len, len);
     }
 
     if (_currentHeader.fin)
     {
-      if (_currentHeader.opcode == FrameOpcode::Continuation)
-      {
-        _currentHeader.opcode = _continuationOpcode;
-        DataBlock &db = _p->readData[_p->readData.size() - _continuationBlocks - 1];
-        for (size_t i = 1; i <= _continuationBlocks; ++i)
-          db.length += _p->readData[_p->readData.size() - i].length;
-
-        while (_continuationBlocks--) _p->readData.pop_back();
-        _continuationBlocks = 0;
-      }
-
-      DataBlock &db = _p->readData.back();
-      db.isCompleted = true;
-
+      DataBlock &db = _p->readBlocks->blockEnd();
       switch (_currentHeader.opcode)
       {
-      case FrameOpcode::Ping: pong(); break;
-      case FrameOpcode::Text:
-      {
-        db.isText = true;
-        _p->readBuffer->push_back(0);
-        ++db.length;
-      }
-      break;
-      case FrameOpcode::ConnectionClose:
-        _p->shouldClose = true;
-        break;
+        case Opcode::Ping: pushData(_p->readBlocks->buffer.data() + db.offset, db.length, Opcode::Pong); break;
+        case Opcode::Text: _p->readBlocks->buffer.push_back(0); ++db.length; break;
+        case Opcode::ConnectionClose: _p->shouldClose = true; break;
       }
 
-      if (_currentHeader.opcode == FrameOpcode::Text || _currentHeader.opcode == FrameOpcode::Binary)
-      {
-        if (asyncReceivedData(db, _p->readBuffer->data() + db.offset, db.length))
-        {
-          _p->readBuffer->resize(db.offset);
-          _p->readData.pop_back();
-        }
-      }
-    }
-    else
-    {
-      if (!_continuationBlocks) _continuationOpcode = _currentHeader.opcode;
-      ++_continuationBlocks;
+      if (_currentHeader.opcode == Opcode::Text || _currentHeader.opcode == Opcode::Binary)
+        if (asyncReceivedData(db, _p->readBlocks->buffer.data() + db.offset, db.length)) _p->readBlocks->blockRemove();
     }
   }
 
@@ -1077,6 +1077,8 @@ bool WebSocketClient::handshake()
     size_t result = readLine(lineBuffer, 256);
     if (result <= 1) break;
     if (!memcmp(lineBuffer, "Sec-WebSocket-Key: ", 19)) key = lineBuffer + 19;
+
+    std::cout << lineBuffer << std::endl;
   }
 
   if (key.empty()) return false;
@@ -1092,14 +1094,10 @@ bool WebSocketClient::handshake()
   response += lineBuffer;
   response += "\n\n";
 
+  std::cout << std::endl << std::endl << response << std::endl;
+
   write(response.c_str(), response.length());
   return true;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-void WebSocketClient::pong()
-{
-
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1109,7 +1107,7 @@ size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   uint8_t *cursor = ptr;
   HAVE_ENOUGH_BYTES(2);
   header.fin = ((*cursor) & 0x80) != 0;
-  header.opcode = static_cast<FrameOpcode>((*cursor++) & 0x0F);
+  header.opcode = static_cast<Opcode>((*cursor++) & 0x0F);
 
   header.masked = ((*cursor) & 0x80) != 0;
   uint8_t byte = (*cursor++) & 0x7F;
@@ -1123,7 +1121,8 @@ size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   else if (byte == 127)
   {
     HAVE_ENOUGH_BYTES(8);
-    header.payloadLength = Endian::swap64(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    uint64_t length64 = Endian::swap64(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    header.payloadLength = static_cast<size_t>(length64);
     cursor += 8;
   }
 
@@ -1161,7 +1160,7 @@ size_t WebSocketClient::writeFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   {
     HAVE_ENOUGH_BYTES(8);
     *cursor++ |= 127;
-    *reinterpret_cast<uint64_t *>(cursor) = Endian::swap64(header.payloadLength);
+    *reinterpret_cast<uint64_t *>(cursor) = Endian::swap64(static_cast<uint64_t>(header.payloadLength));
     cursor += 8;
   }
 

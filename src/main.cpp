@@ -11,9 +11,9 @@ public:
   VerboseWebSocketClient(headsocket::TcpServer *server, headsocket::ConnectionParams *params): Base(server, params) { }
 
 protected:
-  bool asyncReceivedData(const TcpClient::DataBlock &db, uint8_t *ptr, size_t length) override
+  bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) override
   {
-    if (db.isText)
+    if (db.opcode == headsocket::Opcode::Text)
     {
       std::cout << "Message: " << reinterpret_cast<const char *>(ptr) << std::endl;
       pushData("Thank you for this beautiful text message!");
