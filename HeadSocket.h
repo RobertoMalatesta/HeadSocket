@@ -298,6 +298,8 @@ struct CriticalSection
   void unlock() const { consumerLock = false; }
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 template <typename T, typename M = CriticalSection>
 struct LockableValue : M
 {
@@ -305,6 +307,8 @@ struct LockableValue : M
   T *operator->() { return &value; }
   const T *operator->() const { return &value; }
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Semaphore
 {
@@ -324,6 +328,8 @@ struct Semaphore
   void notify() { { std::lock_guard<std::mutex> lock(mutex); ++count; } cv.notify_one(); }
   void consume() const { if (count) --count; }
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct DataBlockBuffer
 {

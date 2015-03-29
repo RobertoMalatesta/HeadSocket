@@ -39,10 +39,15 @@
     var L = outputBuffer.getChannelData(0);
     var R = outputBuffer.getChannelData(1);
     
-    for (var i = 0; i < outputBuffer.length; ++i) {
-      L[i] = sampleBuffer[0]; sampleBuffer.shift();
-      R[i] = sampleBuffer[0]; sampleBuffer.shift();
+    var j = 0;
+    for (var i = 0; i < outputBuffer.length; j += 2) {
+      L[i] = sampleBuffer[j];
+      R[i++] = sampleBuffer[j + 1];
+      L[i] = sampleBuffer[j];
+      R[i++] = sampleBuffer[j + 1];
     }
+    
+    sampleBuffer = sampleBuffer.slice(j);
     
     var newSamples = 4 * bufferSize - sampleBuffer;
     if (newSamples > 0 && ws.readyState == 1)
@@ -58,11 +63,11 @@
   }
 
   function onMessage(e) {
-    var dv = new DataView(e.data);
-    var samples = dv.byteLength / 4;
+    var int8s = new Int8Array(e.data);
+    var samples = int8s.length;
     
     for (var i = 0; i < samples; ++i)
-      sampleBuffer.push(dv.getFloat32(i * 4, true));
+      sampleBuffer.push(int8s[i] / 127.0);
       
     totalSamplesStreamed += samples / 2;
     content.innerHTML = "Streaming XM music from: " + uri + "<br />";

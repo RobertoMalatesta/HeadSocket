@@ -60,8 +60,16 @@ public:
     else if (value > 0)
     {
       _sampleBuffer.resize(value);
+      _smallSampleBuffer.resize(value / 2);
       xm_generate_samples(_xmContext, _sampleBuffer.data(), _sampleBuffer.size() / 2);
-      pushData(_sampleBuffer.data(), sizeof(float) * _sampleBuffer.size());
+
+      for (size_t i = 0, j = 0; i < value; i += 4, j += 2)
+      {
+        _smallSampleBuffer[j + 0] = static_cast<int8_t>((_sampleBuffer[i + 0] + _sampleBuffer[i + 2]) * 0.5f * 127.0f);
+        _smallSampleBuffer[j + 1] = static_cast<int8_t>((_sampleBuffer[i + 1] + _sampleBuffer[i + 3]) * 0.5f * 127.0f);
+      }
+
+      pushData(_smallSampleBuffer.data(), sizeof(int8_t) * _smallSampleBuffer.size());
     }
 
     return true;
@@ -70,6 +78,7 @@ public:
 private:
   xm_context_t *_xmContext = nullptr;
 
+  std::vector<int8_t> _smallSampleBuffer;
   std::vector<float> _sampleBuffer;
 };
 
