@@ -25,7 +25,7 @@ public:
     // Print command:
     {
       HEADSOCKET_LOCK(consoleCS);
-      std::cout << "Client " << getServerID() << " received: " << cmd << std::endl;
+      std::cout << "Client " << getID() << " received: " << cmd << std::endl;
     }
 
     // Parse command & parameter
@@ -108,13 +108,13 @@ public:
   void clientConnected(headsocket::TcpClient *client) override
   {
     HEADSOCKET_LOCK(consoleCS);
-    std::cout << "Client " << client->getServerID() << " connected!" << std::endl;
+    std::cout << "Client " << client->getID() << " connected!" << std::endl;
   }
 
   void clientDisconnected(headsocket::TcpClient *client) override
   {
     HEADSOCKET_LOCK(consoleCS);
-    std::cout << "Client " << client->getServerID() << " disconnected!" << std::endl;
+    std::cout << "Client " << client->getID() << " disconnected!" << std::endl;
   }
 };
 

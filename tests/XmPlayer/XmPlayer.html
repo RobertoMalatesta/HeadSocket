@@ -18,7 +18,8 @@
 
 <script language="javascript" type="text/javascript">
   var content = document.getElementById("content");
-  var uri = "ws://localhost:42666";
+  //var uri = "ws://localhost:42667";
+  var uri = "ws://89.14.70.94:42667";
   var bufferSize = 4096;
   var sampleBuffer = [];
   var ws;
@@ -65,7 +66,8 @@
       sampleBuffer.push(dv.getFloat32(i * 4, true));
       
     totalSamplesStreamed += samples / 2;
-    content.innerHTML = "Number of stereo samples streamed: " + totalSamplesStreamed.toString();
+    content.innerHTML = "Streaming XM music from: " + uri + "<br />";
+    content.innerHTML += "Number of stereo samples streamed: " + totalSamplesStreamed.toString();
   }
 
   function main() {

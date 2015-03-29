@@ -306,14 +306,14 @@ char* xm_load_module(xm_context_t* ctx, const char* moddata, size_t moddata_leng
       instr->panning_envelope.loop_end_point = READ_U8(offset + 232);
 
       uint8_t flags = READ_U8(offset + 233);
-      instr->volume_envelope.enabled = flags & (1 << 0);
-      instr->volume_envelope.sustain_enabled = flags & (1 << 1);
-      instr->volume_envelope.loop_enabled = flags & (1 << 2);
+      instr->volume_envelope.enabled = (flags & (1 << 0)) != 0;
+      instr->volume_envelope.sustain_enabled = (flags & (1 << 1)) != 0;
+      instr->volume_envelope.loop_enabled = (flags & (1 << 2)) != 0;
 
       flags = READ_U8(offset + 234);
-      instr->panning_envelope.enabled = flags & (1 << 0);
-      instr->panning_envelope.sustain_enabled = flags & (1 << 1);
-      instr->panning_envelope.loop_enabled = flags & (1 << 2);
+      instr->panning_envelope.enabled = (flags & (1 << 0)) != 0;
+      instr->panning_envelope.sustain_enabled = (flags & (1 << 1)) != 0;
+      instr->panning_envelope.loop_enabled = (flags & (1 << 2)) != 0;
 
       instr->vibrato_type = (xm_waveform_type_t)READ_U8(offset + 235);
       if(instr->vibrato_type == 2) {

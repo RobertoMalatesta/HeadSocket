@@ -17,6 +17,8 @@ public:
   {
     if (_xmContext)
       xm_free_context(_xmContext);
+
+    std::cout << "Client " << getID() << " disconnected!" << std::endl;
   }
 
   bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) override
@@ -31,7 +33,11 @@ public:
     if (!_xmContext)
     {
       FILE *fr = fopen("song.xm", "rb");
-      if (!fr) return true;
+      if (!fr)
+      {
+        std::cout << "Song not found!" << std::endl;
+        return true;
+      }
 
       fseek(fr, 0, SEEK_END);
       size_t size = (size_t)(ftell(fr));
@@ -48,6 +54,8 @@ public:
       }
 
       xm_set_max_loop_count(_xmContext, 0);
+
+      std::cout << "Client " << getID() << " connected!" << std::endl;
     }
     else if (value > 0)
     {
@@ -69,7 +77,7 @@ int main(int argc, char *argv[])
 {
   typedef headsocket::CustomTcpServer<Client> Server;
 
-  int port = 42666;
+  int port = 42667;
   Server server(port);
   
   if (server.isRunning())

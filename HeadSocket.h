@@ -175,7 +175,7 @@ public:
   bool isAsync() const;
 
   TcpServer *getServer() const;
-  size_t getServerID() const;
+  size_t getID() const;
 
   size_t write(const void *ptr, size_t length);
   bool forceWrite(const void *ptr, size_t length);
@@ -524,7 +524,7 @@ struct TcpServerImpl
   SOCKET serverSocket = INVALID_SOCKET;
   std::thread *acceptThread = nullptr;
   std::thread *disconnectThread = nullptr;
-  size_t nextClientID = 0;
+  size_t nextClientID = 1;
 
   TcpServerImpl() { isRunning = false; disconnectThreadQuit = false; }
 };
@@ -535,7 +535,7 @@ struct ConnectionParams
 {
   SOCKET clientSocket;
   sockaddr_in from;
-  size_t serverID;
+  size_t id;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -640,7 +640,7 @@ void TcpServer::acceptThread()
   {
     ConnectionParams params;
     params.clientSocket = accept(_p->serverSocket, (struct sockaddr *)&params.from, NULL);
-    params.serverID = _p->nextClientID++;
+    params.id = _p->nextClientID++; if (!_p->nextClientID) ++_p->nextClientID;
     if (!_p->isRunning) break;
 
     if (params.clientSocket != INVALID_SOCKET)
@@ -687,7 +687,7 @@ struct TcpClientImpl
   Semaphore writeSemaphore;
   LockableValue<DataBlockBuffer> writeBlocks;
   LockableValue<DataBlockBuffer> readBlocks;
-  size_t serverID = 0;
+  size_t id = 0;
   bool isAsync = false;
   TcpServer *server = nullptr;
   SOCKET clientSocket = INVALID_SOCKET;
@@ -751,7 +751,7 @@ TcpClient::TcpClient(TcpServer *server, ConnectionParams *params, bool makeAsync
   _p->server = server;
   _p->clientSocket = params->clientSocket;
   _p->from = params->from;
-  _p->serverID = params->serverID;
+  _p->id = params->id;
   _p->isConnected = true;
 
   if (makeAsync) initAsyncThreads();
@@ -800,7 +800,7 @@ bool TcpClient::isAsync() const { return _p->isAsync; }
 TcpServer *TcpClient::getServer() const { return _p->server; }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::getServerID() const { return _p->serverID; }
+size_t TcpClient::getID() const { return _p->id; }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::write(const void *ptr, size_t length)
