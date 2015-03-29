@@ -90,6 +90,9 @@
     <ClInclude Include="libxm\xm.h" />
     <ClInclude Include="libxm\xm_internal.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="XmPlayer.html" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

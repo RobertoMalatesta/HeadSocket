@@ -29,4 +29,7 @@
     </ClInclude>
     <ClInclude Include="..\..\HeadSocket.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="XmPlayer.html" />
+  </ItemGroup>
 </Project>
