@@ -249,6 +249,8 @@ public:
   size_t popData(void *ptr, size_t length);
 
 protected:
+  void socketClosed() override;
+
   virtual void initAsyncThreads();
   virtual size_t asyncWriteHandler(uint8_t *ptr, size_t length);
   virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
@@ -688,7 +690,11 @@ void BaseTcpServer::stop()
     bool allGone = false;
     while (!allGone)
     {
-      { HEADSOCKET_LOCK(_p->connections); allGone = _p->connections->empty(); }
+      {
+        HEADSOCKET_LOCK(_p->connections);
+        allGone = _p->connections->empty();
+        if (!allGone) disconnect(_p->connections->front());
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
@@ -1051,6 +1057,16 @@ void AsyncTcpClient::initAsyncThreads()
 {
   _ap->writeThread = new std::thread(std::bind(&AsyncTcpClient::writeThread, this));
   _ap->readThread = new std::thread(std::bind(&AsyncTcpClient::readThread, this));
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void AsyncTcpClient::socketClosed()
+{
+  _ap->writeSemaphore.notify();
+  _ap->writeThread->join();
+  _ap->readThread->join();
+  delete _ap->writeThread; _ap->writeThread = nullptr;
+  delete _ap->readThread; _ap->readThread = nullptr;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
