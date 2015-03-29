@@ -325,24 +325,6 @@ struct Semaphore
   void consume() const { if (count) --count; }
 };
 
-struct EntryCounter
-{
-  mutable std::atomic_size_t count;
-  mutable std::mutex mutex;
-  mutable std::condition_variable cv;
-
-  EntryCounter() { count = 0; }
-
-  void wait() const
-  {
-    std::unique_lock<std::mutex> lock(mutex);
-    cv.wait(lock, [&]()->bool { return count == 0; });
-    lock.unlock();
-  }
-  void enter() const { std::lock_guard<std::mutex> lock(mutex); ++count; }
-  void exit() { { std::lock_guard<std::mutex> lock(mutex); if (count > 0) --count; } cv.notify_one(); }
-};
-
 struct DataBlockBuffer
 {
   std::vector<DataBlock> blocks;
@@ -666,6 +648,7 @@ void TcpServer::acceptThread()
       HEADSOCKET_LOCK(_p->connections);
       if (TcpClient *newClient = clientAccept(&params))
       { _p->connections->push_back(newClient); clientConnected(newClient); }
+      else { closesocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
     }
   }
 }

@@ -85,7 +85,6 @@ int main(int argc, char *argv[])
   else
     std::cout << "Could not start server!" << std::endl;
 
-  char ch;
-  std::cin >> ch;
+  std::getchar();
   return 0;
 }
