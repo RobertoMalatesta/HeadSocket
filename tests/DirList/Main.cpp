@@ -13,7 +13,7 @@ headsocket::CriticalSection consoleCS;
 class Client : public headsocket::WebSocketClient
 {
 public:
-  HEADSOCKET_CLIENT_CTOR_NO_ASYNC(Client, headsocket::WebSocketClient);
+  HEADSOCKET_CLIENT_CTOR(Client, headsocket::WebSocketClient);
 
   bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) override
   {
@@ -100,18 +100,18 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Server : public headsocket::CustomTcpServer<Client>
+class Server : public headsocket::TcpServer<Client>
 {
 public:
-  HEADSOCKET_SERVER_CTOR(Server, headsocket::CustomTcpServer<Client>);
+  HEADSOCKET_SERVER_CTOR(Server, headsocket::TcpServer<Client>);
 
-  void clientConnected(headsocket::TcpClient *client) override
+  void clientConnected(Client *client) override
   {
     HEADSOCKET_LOCK(consoleCS);
     std::cout << "Client " << client->getID() << " connected!" << std::endl;
   }
 
-  void clientDisconnected(headsocket::TcpClient *client) override
+  void clientDisconnected(Client *client) override
   {
     HEADSOCKET_LOCK(consoleCS);
     std::cout << "Client " << client->getID() << " disconnected!" << std::endl;

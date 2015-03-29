@@ -11,7 +11,7 @@
 class Client : public headsocket::WebSocketClient
 {
 public:
-  HEADSOCKET_CLIENT_CTOR_NO_ASYNC(Client, headsocket::WebSocketClient);
+  HEADSOCKET_CLIENT_CTOR(Client, headsocket::WebSocketClient);
 
   virtual ~Client()
   {
@@ -84,10 +84,8 @@ private:
 
 int main(int argc, char *argv[])
 {
-  typedef headsocket::CustomTcpServer<Client> Server;
-
   int port = 42667;
-  Server server(port);
+  headsocket::WebSocketServer<Client> server(port);
   
   if (server.isRunning())
     std::cout << "XM module server is running at port " << port << std::endl;
