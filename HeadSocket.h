@@ -178,6 +178,8 @@ protected:
   className(const char *address, int port): baseClassName(address, port) { } \
   className(headsocket::TcpServer *server, headsocket::ConnectionParams *params): baseClassName(server, params) { }
 
+class BaseTcpClient;
+
 class TcpClient
 {
 public:
