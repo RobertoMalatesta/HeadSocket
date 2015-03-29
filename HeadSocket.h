@@ -1,6 +1,24 @@
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-* Minimalistic header only WebSocket server implementation in C++ *
+***** HeadSocket v0.1, created by Jan Pinter **** Minimalistic header only WebSocket server implementation in C++ *****
+                    Sources: https://github.com/P-i-N/HeadSocket, contact: Pinter.Jan@gmail.com
+                     PUBLIC DOMAIN - no warranty implied or offered, use this at your own risk
+
+-----------------------------------------------------------------------------------------------------------------------
+
+Usage:
+- use this as a regular header file, but in one of your C++ files (ie. main.cpp) you must define
+  HEADSOCKET_IMPLEMENTATION beforehand, like this:
+
+    #define HEADSOCKET_IMPLEMENTATION
+    #include <HeadSocket.h>
+    
+-----------------------------------------------------------------------------------------------------------------------
+
+Version history:
+
+  = 0.1
+    - TcpServer, TcpClient, CustomTcpServer<T>, WebSocketClient
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma once
