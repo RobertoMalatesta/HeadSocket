@@ -1,5 +1,5 @@
 # HeadSocket v0.1
-Minimalistic header only *WebSocket* server implementation in **C++11**
+Minimalistic header only WebSocket server implementation in C++11
 
 PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 
@@ -250,3 +250,9 @@ int main()
 }
 
 ```
+
+----------
+
+# Credits:
+- XmPlayer test uses awesome [libxm](https://github.com/Artefact2/libxm) by Artefact2 (Romain Dalmaso)
+- song.xm (Hybrid Song 2:20) in XmPlayer test downloaded from [modarchive.org](http://www.modarchive.org/)
