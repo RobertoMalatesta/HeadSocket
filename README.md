@@ -101,13 +101,8 @@ int main()
     {
     	for (auto client : server.enumerateClients())
     	{
-    		// What kind of data is in next block (binary or text)
-    		Opcode op;
-    		
-    		// How big is the next data block
-    		size_t size;
-    		
-    		while (size = client->peekData(&op))
+    		// Loop until there is no new data block available (returned size is 0)
+    		while (size_t size = client->peekData())
     		{
     			// Resize buffer accordingly
     			buffer.resize(size);
