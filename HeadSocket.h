@@ -130,6 +130,15 @@ struct DataBlock
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+class Object
+{
+protected:
+  virtual void addRef() const = 0;
+  virtual void release() const = 0;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #define HEADSOCKET_SERVER_CTOR(className, baseClassName) \
   className(int port): baseClassName(port) { }
 
@@ -154,8 +163,79 @@ protected:
   struct BaseTcpServerImpl *_p;
 
 private:
+  template <typename T> friend class Enumerator;
+
+  size_t addRefClients() const;
+  void releaseClients() const;
+
+  BaseTcpClient *getClient(size_t index) const;
+  size_t getNumClients() const;
+
   void acceptThread();
   void disconnectThread();
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+class Handle
+{
+public:
+  Handle() : _ptr(nullptr) { }
+  Handle(T *ptr) : _ptr(ptr) { if (_ptr) _ptr->addRef(); }
+  Handle(const Handle &rp) : _ptr(rp._ptr) { if (_ptr) _ptr->addRef(); }
+  Handle(Handle &&rp) : _ptr(rp._ptr) { rp._ptr = nullptr; }
+
+  template <class Other>
+  Handle(const Handle<Other> &rp) : _ptr(rp._ptr) { if (_ptr) _ptr->addRef(); }
+
+  template <class Other>
+  Handle(Handle<Other> &&rp) : _ptr(rp._ptr) { rp._ptr = nullptr; }
+
+  ~Handle() { if (_ptr) _ptr->release(); _ptr = nullptr; }
+
+  operator T *() const { return _ptr; }
+  T &operator*() const { return *_ptr; }
+  T *operator->() const { return _ptr; }
+  T *get() const { return _ptr; }
+  bool operator!() const { return _ptr == nullptr; }
+
+private:
+  template <class Other> friend class Handle;
+  T *_ptr;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+class Enumerator
+{
+public:
+  Enumerator(const BaseTcpServer *server): _server(server) { _count = _server->addRefClients(); }
+  ~Enumerator() { _server->releaseClients(); }
+
+  const BaseTcpServer *getServer() const { return _server; }
+  size_t getCount() const { return _count; }
+
+  struct Iterator
+  {
+    Enumerator *enumerator;
+    size_t index;
+
+    Iterator(Enumerator *e, size_t i): enumerator(e), index(i) { }
+
+    bool operator==(const Iterator &iter) const { return iter.index == index && iter.enumerator == enumerator; }
+    bool operator!=(const Iterator &iter) const { return iter.index != index || iter.enumerator != enumerator; }
+    Iterator &operator++() { ++index; return *this; }
+    T *operator*() const { return reinterpret_cast<T *>(enumerator->getServer()->getClient(index)); }
+  };
+
+  Iterator begin() { return Iterator(this, 0); }
+  Iterator end() { return Iterator(this, _count); }
+
+private:
+  const BaseTcpServer *_server;
+  size_t _count;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -168,6 +248,8 @@ public:
 
   TcpServer(int port) : Base(port) { }
   virtual ~TcpServer() { }
+
+  Enumerator<T> enumerateClients() const { return Enumerator<T>(this); }
 
 protected:
   virtual void clientConnected(T *client) { }
@@ -191,7 +273,7 @@ private:
   className(const char *address, int port): baseClassName(address, port) { } \
   className(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params): baseClassName(server, params) { }
 
-class BaseTcpClient
+class BaseTcpClient : public Object
 {
 public:
   static const size_t InvalidOperation = (size_t)(-1);
@@ -212,6 +294,14 @@ protected:
   virtual void socketClosed() { }
 
   struct BaseTcpClientImpl *_p;
+
+private:
+  friend class BaseTcpServer;
+  template <typename T> friend class Handle;
+  template <typename T> friend class Enumerator;
+
+  void addRef() const override;
+  void release() const override;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -632,7 +722,7 @@ struct BaseTcpServerImpl
   std::atomic_bool isRunning;
   std::atomic_bool disconnectThreadQuit;
   sockaddr_in local;
-  LockableValue<std::vector<BaseTcpClient *>> connections;
+  LockableValue<std::vector<Handle<BaseTcpClient>>> connections;
   Semaphore disconnectSemaphore;
   int port = 0;
   SOCKET serverSocket = INVALID_SOCKET;
@@ -734,6 +824,35 @@ void BaseTcpServer::disconnect(BaseTcpClient *client)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+BaseTcpClient *BaseTcpServer::getClient(size_t index) const
+{
+  HEADSOCKET_LOCK(_p->connections);
+  return index < _p->connections->size() ? _p->connections->at(index) : nullptr;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t BaseTcpServer::getNumClients() const
+{
+  HEADSOCKET_LOCK(_p->connections);
+  return _p->connections->size();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t BaseTcpServer::addRefClients() const
+{
+  HEADSOCKET_LOCK(_p->connections);
+  for (auto client : _p->connections.value) client->addRef();
+  return _p->connections->size();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void BaseTcpServer::releaseClients() const
+{
+  HEADSOCKET_LOCK(_p->connections);
+  for (auto client : _p->connections.value) client->release();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void BaseTcpServer::acceptThread()
 {
   while (_p->isRunning)
@@ -773,7 +892,6 @@ void BaseTcpServer::disconnectThread()
       {
         BaseTcpClient *client = _p->connections->at(i);
         _p->connections->erase(_p->connections->begin() + i);
-        delete client;
         _p->disconnectSemaphore.consume();
       }
       else
@@ -786,6 +904,7 @@ void BaseTcpServer::disconnectThread()
 
 struct BaseTcpClientImpl
 {
+  std::atomic_int refCount;
   std::atomic_bool isConnected;
   std::atomic_bool shouldClose;
   sockaddr_in from;
@@ -795,7 +914,7 @@ struct BaseTcpClientImpl
   std::string address = "";
   int port = 0;
 
-  BaseTcpClientImpl() { isConnected = false; shouldClose = false; }
+  BaseTcpClientImpl() { refCount = 0; isConnected = false; shouldClose = false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -862,6 +981,12 @@ BaseTcpClient::~BaseTcpClient()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+void BaseTcpClient::addRef() const { ++_p->refCount; }
+
+//---------------------------------------------------------------------------------------------------------------------
+void BaseTcpClient::release() const { if (!(--_p->refCount)) delete this; }
+
+//---------------------------------------------------------------------------------------------------------------------
 void BaseTcpClient::disconnect()
 {
   if (_p->isConnected.exchange(false))
@@ -872,7 +997,8 @@ void BaseTcpClient::disconnect()
       _p->clientSocket = INVALID_SOCKET;
     }
 
-    socketClosed();
+    if (_p->server)
+      _p->server->disconnect(this);
   }
 }
 
@@ -1016,6 +1142,12 @@ AsyncTcpClient::AsyncTcpClient(BaseTcpServer *server, ConnectionParams *params):
 //---------------------------------------------------------------------------------------------------------------------
 AsyncTcpClient::~AsyncTcpClient()
 {
+  _ap->writeSemaphore.notify();
+  _ap->writeThread->join();
+  _ap->readThread->join();
+  delete _ap->writeThread; _ap->writeThread = nullptr;
+  delete _ap->readThread; _ap->readThread = nullptr;
+
   delete _ap;
 }
 
@@ -1078,6 +1210,7 @@ void AsyncTcpClient::writeThread()
     size_t written = 0;
     {
       HEADSOCKET_LOCK(_ap->writeSemaphore);
+      if (_ap->isDisconnecting) break;
       written = asyncWriteHandler(buffer.data(), buffer.size());
     }
     if (written == InvalidOperation) break;
@@ -1095,6 +1228,7 @@ void AsyncTcpClient::writeThread()
     }
   }
   exitThreads();
+  std::cout << "*writeThread exited* " << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1142,13 +1276,19 @@ void AsyncTcpClient::readThread()
     if (bufferBytes) memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
   }
   exitThreads();
+  std::cout << "*readThread exited* " << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 void AsyncTcpClient::exitThreads()
 {
   if (!_ap->isDisconnecting.exchange(true))
-    _p->server->disconnect(this);
+  {
+    if (std::this_thread::get_id() == _ap->readThread->get_id())
+      _ap->writeSemaphore.notify();
+
+    disconnect();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

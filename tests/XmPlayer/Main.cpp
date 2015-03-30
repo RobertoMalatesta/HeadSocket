@@ -92,6 +92,16 @@ int main(int argc, char *argv[])
   else
     std::cout << "Could not start server!" << std::endl;
 
+  while (true)
+  {
+    for (auto client : server.enumerateClients())
+    {
+      std::cout << "Ticking client " << client->getID() << std::endl;
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+
   std::getchar();
   return 0;
 }
