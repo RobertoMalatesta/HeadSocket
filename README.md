@@ -14,6 +14,7 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 - no TLS, secured connections are not supported and probably never will be supported
 - the API might *(and probably will)* change in the future
 - you can use this as a simple TCP network library as well
+- WebSocket frame continuation is supported *(and automatically resolved for you)*
 - performance is not great *(but should be enough in most cases)*
 - UTF-8? Unicode? What?!
 - bugfixes and suggestions are welcome!
@@ -73,14 +74,12 @@ int main()
         
     return 0;
 }
-
 ```
 
 ----------
 
 <a id="example1"></a>
 ### Quickstart example 2 *(synchronous)*
-*TODO*
 ```cpp
 #include <iostream>
 
@@ -94,15 +93,37 @@ int main()
 	int port = 12345;
     WebSocketServer<WebSocketClient> server(port);
 
+	// Buffer for transfering data blocks out of connected clients
+	std::vector<uint8_t> buffer;
+    	
 	// Your main loop
 	while (true)
     {
-    	// ... do other work
+    	for (auto client : server.enumerateClients())
+    	{
+    		// What kind of data is in next block (binary or text)
+    		Opcode op;
+    		
+    		// How big is the next data block
+    		size_t size;
+    		
+    		while (size = client->peekData(&op))
+    		{
+    			// Resize buffer accordingly
+    			buffer.resize(size);
+    			
+    			// Copy next available client's data block into our buffer
+    			client->popData(buffer.data(), size);
+    			
+    			// ... process the buffer!
+    		}
+    	}
+    	
+    	// ... do some other work
     }
         
     return 0;
 }
-
 ```
 
 ----------
