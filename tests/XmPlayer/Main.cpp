@@ -61,6 +61,7 @@ public:
     {
       _sampleBuffer.resize(value);
       _smallSampleBuffer.resize(value / 2);
+
       xm_generate_samples(_xmContext, _sampleBuffer.data(), _sampleBuffer.size() / 2);
 
       for (size_t i = 0, j = 0; i < value; i += 4, j += 2)
@@ -91,16 +92,6 @@ int main(int argc, char *argv[])
     std::cout << "XM module server is running at port " << port << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;
-
-  while (true)
-  {
-    for (auto client : server.enumerateClients())
-    {
-      std::cout << "Ticking client " << client->getID() << std::endl;
-    }
-
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-  }
 
   std::getchar();
   return 0;
