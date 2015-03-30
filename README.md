@@ -6,62 +6,25 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 ----------
 
 ### Before you start
-- [**"I don't care! Just gimme something to start with already!" (click)**](#quickstart)
+- [**"I don't care! Just gimme something to start with already!" (click)**](#example1)
 
 
 - this is just an experiment, currently full of bugs and probably full of hidden deadlocks and other nasty race conditions
 - only a tiny part of [RFC 6455](https://tools.ietf.org/html/rfc6455) is implemented
-- no TLS, secured connections are not supported and probably never will be supported *(yes, THAT kind of minimalistic!)*
+- no TLS, secured connections are not supported and probably never will be supported
 - the API might *(and probably will)* change in the future
-- you can use this as a simple *(minimalistic)* TCP network library as well
+- you can use this as a simple TCP network library as well
 - performance is not great *(but should be enough in most cases)*
-- UTF-8? Unicode? What is that?!
+- UTF-8? Unicode? What?!
 - bugfixes and suggestions are welcome!
 
 ### What is this good for?
-I needed an easy way to quickly create remote connection interfaces. By embedding small WebSocket server into my code, I can communicate with it using JavaScript from almost any browser, any platform and any place over network. Writing debugging tools, remote controllers or profilers gets much easier, because now you can make them with HTML and JavaScript!
+I needed an easy way to quickly create remote connection interfaces. By embedding small WebSocket server into my code, I can communicate with it from almost any browser, any platform and any place over network. Writing simple debugging tools, remote controllers or profilers gets much easier, because all I need is just a bit of HTML and JavaScript!
 
 ----------
 
-### headsocket::`BaseTcpServer`
-*TODO*
-
-----------
-
-### headsocket::`TcpServer<T>`
-*TODO*
-
-----------
-
-### headsocket::`BaseTcpClient`
-*TODO*
-
-----------
-
-### headsocket::`TcpClient`
-*TODO*
-
-----------
-
-### headsocket::`AsyncTcpClient`
-*TODO*
-
-----------
-
-### headsocket::`WebSocketClient`
-
-*TODO*
-
-----------
-
-### headsocket::`WebSocketServer<T>`
-
-*TODO*
-
-----------
-
-<a id="quickstart"></a>
-### Quickstart example
+<a id="example1"></a>
+### Quickstart example 1 *(asynchronous)*
 ```cpp
 #include <iostream>
 
@@ -112,6 +75,72 @@ int main()
 }
 
 ```
+
+----------
+
+<a id="example1"></a>
+### Quickstart example 2 *(synchronous)*
+*TODO*
+```cpp
+#include <iostream>
+
+#define HEADSOCKET_IMPLEMENTATION
+#include "HeadSocket.h"
+
+using namespace headsocket;
+
+int main()
+{
+	int port = 12345;
+    WebSocketServer<WebSocketClient> server(port);
+
+	// Your main loop
+	while (true)
+    {
+    	// ... do other work
+    }
+        
+    return 0;
+}
+
+```
+
+----------
+
+### headsocket::`BaseTcpServer`
+*TODO*
+
+----------
+
+### headsocket::`TcpServer<T>`
+*TODO*
+
+----------
+
+### headsocket::`BaseTcpClient`
+*TODO*
+
+----------
+
+### headsocket::`TcpClient`
+*TODO*
+
+----------
+
+### headsocket::`AsyncTcpClient`
+*TODO*
+
+----------
+
+### headsocket::`WebSocketClient`
+
+*TODO*
+
+----------
+
+### headsocket::`WebSocketServer<T>`
+
+*TODO*
 
 ----------
 
