@@ -7,7 +7,7 @@
 -----------------------------------------------------------------------------------------------------------------------
 
 Usage:
-- use this as a regular header file, but in one of your C++ files (ie. main.cpp) you must define
+- use this as a regular header file, but in EXACTLY one of your C++ files (ie. main.cpp) you must define
   HEADSOCKET_IMPLEMENTATION beforehand, like this:
 
     #define HEADSOCKET_IMPLEMENTATION
@@ -862,7 +862,6 @@ size_t BaseTcpServer::addRefClients() const
 {
   HEADSOCKET_LOCK(_p->connections);
   for (auto client : _p->connections.value) client->addRef();
-  std::cout << "Number of clients: " << _p->connections->size() << std::endl;
   return _p->connections->size();
 }
 
@@ -1007,7 +1006,6 @@ BaseTcpClient::~BaseTcpClient()
 {
   disconnect();
   delete _p;
-  std::cout << "~BaseTcpClient" << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1247,7 +1245,6 @@ void AsyncTcpClient::writeThread()
     }
   }
   killThreads();
-  std::cout << "*writeThread exited* " << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1295,7 +1292,6 @@ void AsyncTcpClient::readThread()
     if (bufferBytes) memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
   }
   killThreads();
-  std::cout << "*readThread exited* " << std::endl;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
