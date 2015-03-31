@@ -26,6 +26,7 @@ I needed an easy way to quickly create remote connection interfaces. By embeddin
 
 <a id="example1"></a>
 ### Quickstart example 1 *(asynchronous)*
+In this example server accepts and creates client connections asynchronously and every client gets asynchronous callback `asyncReceivedData` when complete data block is received (continuation WebSocket frames are resolved automaticaly):
 ```cpp
 #include <iostream>
 
@@ -79,7 +80,8 @@ int main()
 ----------
 
 <a id="example1"></a>
-### Quickstart example 2 *(synchronous)*
+### Quickstart example 2 *(semi-synchronous)*
+This example has server accepting clients asynchronously, but reading client's data is done by polling (clients still send and receive all the data asynchronously in the background):
 ```cpp
 #include <iostream>
 
