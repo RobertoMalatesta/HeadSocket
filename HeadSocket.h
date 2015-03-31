@@ -1392,7 +1392,7 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 
     if (_currentHeader.fin)
     {
-      DataBlock &db = _ap->readBlocks->blockEnd();
+      DataBlock &db = _ap->readBlocks->blocks.back();
       switch (_currentHeader.opcode)
       {
         case Opcode::Ping: pushData(_ap->readBlocks->buffer.data() + db.offset, db.length, Opcode::Pong); break;
@@ -1402,6 +1402,7 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 
       if (_currentHeader.opcode == Opcode::Text || _currentHeader.opcode == Opcode::Binary)
         if (asyncReceivedData(db, _ap->readBlocks->buffer.data() + db.offset, db.length)) _ap->readBlocks->blockRemove();
+        else _ap->readBlocks->blockEnd();
     }
   }
 
