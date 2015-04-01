@@ -12,13 +12,6 @@ Usage:
 
     #define HEADSOCKET_IMPLEMENTATION
     #include <HeadSocket.h>
-    
------------------------------------------------------------------------------------------------------------------------
-
-Version history:
-
-  = 0.1
-    - TcpServer, TcpClient, CustomTcpServer<T>, WebSocketClient
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma once
@@ -1031,22 +1024,13 @@ size_t BaseTcpClient::getID() const { return _p->id; }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::TcpClient(const char *address, int port): Base(address, port)
-{
-
-}
+TcpClient::TcpClient(const char *address, int port): Base(address, port) { }
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::TcpClient(BaseTcpServer *server, ConnectionParams *params): Base(server, params)
-{
-
-}
+TcpClient::TcpClient(BaseTcpServer *server, ConnectionParams *params): Base(server, params) { }
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::~TcpClient()
-{
-
-}
+TcpClient::~TcpClient() { }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t TcpClient::write(const void *ptr, size_t length)
@@ -1139,16 +1123,12 @@ struct AsyncTcpClientImpl
 
 //---------------------------------------------------------------------------------------------------------------------
 AsyncTcpClient::AsyncTcpClient(const char *address, int port): Base(address, port), _ap(new AsyncTcpClientImpl())
-{
-  initAsyncThreads();
-}
+{ initAsyncThreads(); }
 
 //---------------------------------------------------------------------------------------------------------------------
 AsyncTcpClient::AsyncTcpClient(BaseTcpServer *server, ConnectionParams *params): Base(server, params)
   , _ap(new AsyncTcpClientImpl())
-{
-  initAsyncThreads();
-}
+{ initAsyncThreads(); }
 
 //---------------------------------------------------------------------------------------------------------------------
 AsyncTcpClient::~AsyncTcpClient()
@@ -1292,22 +1272,13 @@ void AsyncTcpClient::killThreads()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::WebSocketClient(const char *address, int port) : Base(address, port)
-{
-
-}
+WebSocketClient::WebSocketClient(const char *address, int port) : Base(address, port) { }
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::WebSocketClient(BaseTcpServer *server, ConnectionParams *params): Base(server, params)
-{
-
-}
+WebSocketClient::WebSocketClient(BaseTcpServer *server, ConnectionParams *params): Base(server, params) { }
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::~WebSocketClient()
-{
-
-}
+WebSocketClient::~WebSocketClient() { }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
