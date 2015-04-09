@@ -23,6 +23,7 @@ Usage:
 #define HEADSOCKET_PLATFORM_WINDOWS
 #elif __ANDROID__
 #define HEADSOCKET_PLATFORM_ANDROID
+#define HEADSOCKET_PLATFORM_NIX
 #elif __APPLE__
 #include "TargetConditionals.h"
 #ifdef TARGET_OS_MAC
@@ -429,7 +430,7 @@ protected:
 #include <WinSock2.h>
 #include <Windows.h>
 #include <ws2tcpip.h>
-#elif defined(HEADSOCKET_PLATFORM_ANDROID)
+#elif defined(HEADSOCKET_PLATFORM_ANDROID) || defined(HEADSOCKET_PLATFORM_NIX)
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/ip.h>
@@ -445,7 +446,7 @@ static const int SocketError = SOCKET_ERROR;
 static const SOCKET InvalidSocket = INVALID_SOCKET;
 void CloseSocket(Socket s) { closesocket(s); }
 #define HEADSOCKET_SPRINTF sprintf_s
-#elif defined(HEADSOCKET_PLATFORM_ANDROID)
+#elif defined(HEADSOCKET_PLATFORM_ANDROID) || defined(HEADSOCKET_PLATFORM_NIX)
 typedef int Socket;
 static const int SocketError = -1;
 static const int InvalidSocket = -1;
