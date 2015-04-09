@@ -41,6 +41,12 @@ Usage:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scopeLock##suffix(var);
+#define HEADSOCKET_LOCK_SUFFIX2(var, suffix) HEADSOCKET_LOCK_SUFFIX(var, suffix)
+#define HEADSOCKET_LOCK(var) HEADSOCKET_LOCK_SUFFIX2(var, __LINE__)
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 /* Forward declarations */
 namespace std { class thread; }
 
@@ -94,9 +100,9 @@ struct Encoding
 
 struct Endian
 {
-  static uint16_t swap16(uint16_t value);
-  static uint32_t swap32(uint32_t value);
-  static uint64_t swap64(uint64_t value);
+  static uint16_t swap16bits(uint16_t x);
+  static uint32_t swap32bits(uint32_t x);
+  static uint64_t swap64bits(uint64_t x);
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -418,22 +424,38 @@ protected:
 #include <condition_variable>
 #include <map>
 
-#ifdef HEADSOCKET_PLATFORM_WINDOWS
+#if defined(HEADSOCKET_PLATFORM_WINDOWS)
 #pragma comment(lib, "ws2_32.lib")
 #include <WinSock2.h>
 #include <Windows.h>
 #include <ws2tcpip.h>
+#elif defined(HEADSOCKET_PLATFORM_ANDROID)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/ip.h>
+#include <unistd.h>
+#include <netdb.h>
 #endif
-
-#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scopeLock##suffix(var);
-#define HEADSOCKET_LOCK_SUFFIX2(var, suffix) HEADSOCKET_LOCK_SUFFIX(var, suffix)
-#define HEADSOCKET_LOCK(var) HEADSOCKET_LOCK_SUFFIX2(var, __LINE__)
 
 namespace headsocket {
 
+#if defined(HEADSOCKET_PLATFORM_WINDOWS)
+typedef SOCKET Socket;
+static const int SocketError = SOCKET_ERROR;
+static const SOCKET InvalidSocket = INVALID_SOCKET;
+void CloseSocket(Socket s) { closesocket(s); }
+#define HEADSOCKET_SPRINTF sprintf_s
+#elif defined(HEADSOCKET_PLATFORM_ANDROID)
+typedef int Socket;
+static const int SocketError = -1;
+static const int InvalidSocket = -1;
+void CloseSocket(Socket s) { close(s); }
+#define HEADSOCKET_SPRINTF sprintf
+#endif
+
 struct ConnectionParams
 {
-  SOCKET clientSocket;
+  Socket clientSocket;
   sockaddr_in from;
   size_t id;
 };
@@ -667,16 +689,16 @@ size_t Encoding::xor32(uint32_t key, void *ptr, size_t length)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-uint16_t Endian::swap16(uint16_t x) { return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8); }
+uint16_t Endian::swap16bits(uint16_t x) { return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8); }
 
 //---------------------------------------------------------------------------------------------------------------------
-uint32_t Endian::swap32(uint32_t x)
+uint32_t Endian::swap32bits(uint32_t x)
 {
   return ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-uint64_t Endian::swap64(uint64_t x)
+uint64_t Endian::swap64bits(uint64_t x)
 {
   return
     ((x & 0x00000000000000FFULL) << 56) | ((x & 0x000000000000FF00ULL) << 40) | ((x & 0x0000000000FF0000ULL) << 24) |
@@ -686,7 +708,7 @@ uint64_t Endian::swap64(uint64_t x)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-size_t socketReadLine(SOCKET socket, void *ptr, size_t length)
+size_t socketReadLine(Socket socket, void *ptr, size_t length)
 {
   if (!ptr || !length) return 0;
   size_t result = 0;
@@ -694,7 +716,7 @@ size_t socketReadLine(SOCKET socket, void *ptr, size_t length)
   {
     char ch;
     int r = recv(socket, &ch, 1, 0);
-    if (!r || r == SOCKET_ERROR) return 0;
+    if (!r || r == SocketError) return 0;
 
     if (r != 1 || ch == '\n') break;
     if (ch != '\r') reinterpret_cast<char *>(ptr)[result++] = ch;
@@ -740,7 +762,7 @@ struct BaseTcpServerImpl
   LockableValue<std::vector<Handle<BaseTcpClient>>> connections;
   Semaphore disconnectSemaphore;
   int port = 0;
-  SOCKET serverSocket = INVALID_SOCKET;
+  Socket serverSocket = InvalidSocket;
   std::thread *acceptThread = nullptr;
   std::thread *disconnectThread = nullptr;
   size_t nextClientID = 1;
@@ -790,7 +812,7 @@ void BaseTcpServer::stop()
 {
   if (_p->isRunning.exchange(false))
   {
-    closesocket(_p->serverSocket);
+    CloseSocket(_p->serverSocket);
     { Enumerator<BaseTcpClient> e(this); for (auto client : e) client->disconnect(); }
 
     if (_p->acceptThread)
@@ -877,7 +899,7 @@ void BaseTcpServer::acceptThread()
     params.id = _p->nextClientID++; if (!_p->nextClientID) ++_p->nextClientID;
     if (!_p->isRunning) break;
 
-    if (params.clientSocket != INVALID_SOCKET)
+    if (params.clientSocket != InvalidSocket)
     {
       bool failed = false;
       if (clientHandshake(&params))
@@ -887,7 +909,7 @@ void BaseTcpServer::acceptThread()
         { _p->connections->push_back(newClient); clientConnected(newClient); } else failed = true;
       }
       else failed = true;
-      if (failed) { closesocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
+      if (failed) { CloseSocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
     }
   }
 }
@@ -917,7 +939,7 @@ struct BaseTcpClientImpl
   sockaddr_in from;
   size_t id = 0;
   BaseTcpServer *server = nullptr;
-  SOCKET clientSocket = INVALID_SOCKET;
+  Socket clientSocket = InvalidSocket;
   std::string address = "";
   int port = 0;
 
@@ -938,7 +960,7 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
   hints.ai_protocol = IPPROTO_TCP;
 
   char buff[16];
-  sprintf_s(buff, "%d", port);
+  HEADSOCKET_SPRINTF(buff, "%d", port);
 
   if (getaddrinfo(address, buff, &hints, &result))
     return;
@@ -946,13 +968,13 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
   for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
   {
     _p->clientSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
-    if (_p->clientSocket == INVALID_SOCKET)
+    if (_p->clientSocket == InvalidSocket)
       return;
 
-    if (connect(_p->clientSocket, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR)
+    if (connect(_p->clientSocket, ptr->ai_addr, (int)ptr->ai_addrlen) == SocketError)
     {
-      closesocket(_p->clientSocket);
-      _p->clientSocket = INVALID_SOCKET;
+      CloseSocket(_p->clientSocket);
+      _p->clientSocket = InvalidSocket;
       continue;
     }
 
@@ -961,7 +983,7 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
 
   freeaddrinfo(result);
 
-  if (_p->clientSocket == INVALID_SOCKET)
+  if (_p->clientSocket == InvalidSocket)
     return;
 
   _p->address = address;
@@ -1001,10 +1023,10 @@ void BaseTcpClient::disconnect()
 {
   if (_p->isConnected.exchange(false))
   {
-    if (_p->clientSocket != INVALID_SOCKET)
+    if (_p->clientSocket != InvalidSocket)
     {
-      closesocket(_p->clientSocket);
-      _p->clientSocket = INVALID_SOCKET;
+      CloseSocket(_p->clientSocket);
+      _p->clientSocket = InvalidSocket;
     }
 
     if (_p->server)
@@ -1037,7 +1059,7 @@ size_t TcpClient::write(const void *ptr, size_t length)
 {
   if (!ptr || !length) return 0;
   int result = send(_p->clientSocket, (const char *)ptr, length, 0);
-  if (!result || result == SOCKET_ERROR) return 0;
+  if (!result || result == SocketError) return 0;
 
   return static_cast<size_t>(result);
 }
@@ -1052,7 +1074,7 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
   while (length)
   {
     int result = send(_p->clientSocket, chPtr, length, 0);
-    if (!result || result == SOCKET_ERROR) return false;
+    if (!result || result == SocketError) return false;
 
     length -= (size_t)result;
     chPtr += result;
@@ -1066,7 +1088,7 @@ size_t TcpClient::read(void *ptr, size_t length)
 {
   if (!ptr || !length) return 0;
   int result = recv(_p->clientSocket, (char *)ptr, length, 0);
-  if (!result || result == SOCKET_ERROR) return 0;
+  if (!result || result == SocketError) return 0;
 
   return static_cast<size_t>(result);
 }
@@ -1081,7 +1103,7 @@ size_t TcpClient::readLine(void *ptr, size_t length)
   {
     char ch;
     int r = recv(_p->clientSocket, &ch, 1, 0);
-    if (!r || r == SOCKET_ERROR) return 0;
+    if (!r || r == SocketError) return 0;
     
     if (r != 1 || ch == '\n') break;
     if (ch != '\r') reinterpret_cast<char *>(ptr)[result++] = ch;
@@ -1100,7 +1122,7 @@ bool TcpClient::forceRead(void *ptr, size_t length)
   while (length)
   {
     int result = recv(_p->clientSocket, chPtr, length, 0);
-    if (!result || result == SOCKET_ERROR) return false;
+    if (!result || result == SocketError) return false;
 
     length -= (size_t)result; chPtr += result;
   }
@@ -1204,7 +1226,7 @@ void AsyncTcpClient::writeThread()
       while (written)
       {
         int result = send(_p->clientSocket, cursor, written, 0);
-        if (!result || result == SOCKET_ERROR) break;
+        if (!result || result == SocketError) break;
         cursor += result;
         written -= static_cast<size_t>(result);
       }
@@ -1246,7 +1268,7 @@ void AsyncTcpClient::readThread()
       if (!result || !consumed)
       {
         result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
-        if (!result || result == SOCKET_ERROR) { consumed = InvalidOperation; break; }
+        if (!result || result == SocketError) { consumed = InvalidOperation; break; }
         bufferBytes += static_cast<size_t>(result);
       }
       consumed = asyncReadHandler(buffer.data(), bufferBytes);
@@ -1381,13 +1403,13 @@ size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   else if (byte == 126)
   {
     HAVE_ENOUGH_BYTES(2);
-    header.payloadLength = Endian::swap16(*(reinterpret_cast<uint16_t *>(cursor)));
+    header.payloadLength = Endian::swap16bits(*(reinterpret_cast<uint16_t *>(cursor)));
     cursor += 2;
   }
   else if (byte == 127)
   {
     HAVE_ENOUGH_BYTES(8);
-    uint64_t length64 = Endian::swap64(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    uint64_t length64 = Endian::swap64bits(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
     header.payloadLength = static_cast<size_t>(length64);
     cursor += 8;
   }
@@ -1419,14 +1441,14 @@ size_t WebSocketClient::writeFrameHeader(uint8_t *ptr, size_t length, FrameHeade
   {
     HAVE_ENOUGH_BYTES(2);
     *cursor++ |= 126;
-    *reinterpret_cast<uint16_t *>(cursor) = Endian::swap16(static_cast<uint16_t>(header.payloadLength));
+    *reinterpret_cast<uint16_t *>(cursor) = Endian::swap16bits(static_cast<uint16_t>(header.payloadLength));
     cursor += 2;
   }
   else
   {
     HAVE_ENOUGH_BYTES(8);
     *cursor++ |= 127;
-    *reinterpret_cast<uint64_t *>(cursor) = Endian::swap64(static_cast<uint64_t>(header.payloadLength));
+    *reinterpret_cast<uint64_t *>(cursor) = Endian::swap64bits(static_cast<uint64_t>(header.payloadLength));
     cursor += 8;
   }
 
