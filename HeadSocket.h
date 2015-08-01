@@ -125,6 +125,9 @@ struct DataBlock
 
 class Object
 {
+public:
+  virtual ~Object() { }
+
 protected:
   virtual void addRef() const = 0;
   virtual void release() const = 0;
@@ -145,12 +148,12 @@ public:
   void disconnect(BaseTcpClient *client);
 
 protected:
-  BaseTcpServer(int port);
+  explicit BaseTcpServer(int port);
 
   virtual bool clientHandshake(headsocket::ConnectionParams *params) { return true; }
   virtual BaseTcpClient *clientAccept(headsocket::ConnectionParams *params) { return nullptr; }
-  virtual void clientConnected(headsocket::BaseTcpClient *client) { }
-  virtual void clientDisconnected(headsocket::BaseTcpClient *client) { }
+  virtual void baseClientConnected(headsocket::BaseTcpClient *client) { }
+  virtual void baseClientDisconnected(headsocket::BaseTcpClient *client) { }
 
   struct BaseTcpServerImpl *_p;
 
@@ -248,7 +251,7 @@ class TcpServer : public BaseTcpServer
 public:
   typedef BaseTcpServer Base;
 
-  TcpServer(int port) : Base(port) { }
+  explicit TcpServer(int port) : Base(port) { }
   virtual ~TcpServer() { }
 
   Enumerator<T> enumerateClients() const { return Enumerator<T>(this); }
@@ -265,8 +268,8 @@ protected:
   }
 
 private:
-  void clientConnected(headsocket::BaseTcpClient *client) { clientConnected(reinterpret_cast<T *>(client)); }
-  void clientDisconnected(headsocket::BaseTcpClient *client) { clientDisconnected(reinterpret_cast<T *>(client)); }
+  void baseClientConnected(headsocket::BaseTcpClient *client) override { clientConnected(reinterpret_cast<T *>(client)); }
+  void baseClientDisconnected(headsocket::BaseTcpClient *client) override { clientDisconnected(reinterpret_cast<T *>(client)); }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -278,7 +281,7 @@ private:
 class BaseTcpClient : public Object
 {
 public:
-  static const size_t InvalidOperation = (size_t)(-1);
+  static const size_t InvalidOperation = static_cast<size_t>(-1);
 
   virtual ~BaseTcpClient();
 
@@ -529,8 +532,8 @@ void setThreadName(const char *name)
 #pragma pack(push,8)
   typedef struct tagTHREADNAME_INFO { DWORD dwType; LPCSTR szName; DWORD dwThreadID; DWORD dwFlags; } THREADNAME_INFO;
 #pragma pack(pop)
-  THREADNAME_INFO info = { 0x1000, name, -1, 0 };
-  __try { RaiseException(0x406D1388, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info); }
+  THREADNAME_INFO info = { 0x1000, name, static_cast<DWORD>(-1), 0 };
+  __try { RaiseException(0x406D1388, 0, sizeof(info) / sizeof(ULONG_PTR), reinterpret_cast<ULONG_PTR *>(&info)); }
   __except (EXCEPTION_EXECUTE_HANDLER) { }
 }
 #else
@@ -817,7 +820,7 @@ void BaseTcpServer::disconnect(BaseTcpClient *client)
 {
   if (client)
   {
-    clientDisconnected(client);
+    baseClientDisconnected(client);
     _p->disconnectSemaphore.notify();
   }
 }
@@ -884,7 +887,7 @@ void BaseTcpServer::acceptThread()
       {
         HEADSOCKET_LOCK(_p->connections);
         if (BaseTcpClient *newClient = clientAccept(&params))
-        { _p->connections->push_back(newClient); clientConnected(newClient); } else failed = true;
+        { _p->connections->push_back(newClient); baseClientConnected(newClient); } else failed = true;
       }
       else failed = true;
       if (failed) { closesocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
@@ -949,7 +952,7 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
     if (_p->clientSocket == INVALID_SOCKET)
       return;
 
-    if (connect(_p->clientSocket, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR)
+    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == SOCKET_ERROR)
     {
       closesocket(_p->clientSocket);
       _p->clientSocket = INVALID_SOCKET;
