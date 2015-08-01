@@ -975,11 +975,7 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
     if (_p->clientSocket == InvalidSocket)
       return;
 
-<<<<<<< HEAD
-    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == SOCKET_ERROR)
-=======
-    if (connect(_p->clientSocket, ptr->ai_addr, (int)ptr->ai_addrlen) == SocketError)
->>>>>>> origin/master
+    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == SocketError)
     {
       CloseSocket(_p->clientSocket);
       _p->clientSocket = InvalidSocket;
