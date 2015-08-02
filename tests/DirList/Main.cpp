@@ -100,10 +100,10 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Server : public headsocket::TcpServer<Client>
+class Server : public headsocket::WebSocketServer<Client>
 {
 public:
-  HEADSOCKET_SERVER_CTOR(Server, headsocket::TcpServer<Client>);
+  HEADSOCKET_SERVER_CTOR(Server, headsocket::WebSocketServer<Client>);
 
   void clientConnected(Client *client) override
   {

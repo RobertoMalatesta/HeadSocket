@@ -14,7 +14,8 @@ Usage:
     #include <HeadSocket.h>
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#pragma once
+#ifndef __HEADSOCKET_H__
+#define __HEADSOCKET_H__
 
 #include <stdint.h>
 
@@ -157,10 +158,10 @@ public:
 protected:
   explicit BaseTcpServer(int port);
 
-  virtual bool clientHandshake(headsocket::ConnectionParams *params) { return true; }
-  virtual BaseTcpClient *clientAccept(headsocket::ConnectionParams *params) { return nullptr; }
-  virtual void baseClientConnected(headsocket::BaseTcpClient *client) { }
-  virtual void baseClientDisconnected(headsocket::BaseTcpClient *client) { }
+  virtual bool connectionHandshake(headsocket::ConnectionParams *params) = 0;
+  virtual BaseTcpClient *clientAccept(headsocket::ConnectionParams *params) = 0;
+  virtual void clientConnected(headsocket::BaseTcpClient *client) = 0;
+  virtual void clientDisconnected(headsocket::BaseTcpClient *client) = 0;
 
   struct BaseTcpServerImpl *_p;
 
@@ -275,8 +276,8 @@ protected:
   }
 
 private:
-  void baseClientConnected(headsocket::BaseTcpClient *client) override { clientConnected(reinterpret_cast<T *>(client)); }
-  void baseClientDisconnected(headsocket::BaseTcpClient *client) override { clientDisconnected(reinterpret_cast<T *>(client)); }
+  void clientConnected(headsocket::BaseTcpClient *client) override { clientConnected(reinterpret_cast<T *>(client)); }
+  void clientDisconnected(headsocket::BaseTcpClient *client) override { clientDisconnected(reinterpret_cast<T *>(client)); }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -409,16 +410,18 @@ public:
   WebSocketServer(int port): Base(port) { }
 
 protected:
-  bool clientHandshake(ConnectionParams *params) override { return Handshake::webSocket(params); }
+  bool connectionHandshake(ConnectionParams *params) override { return Handshake::webSocket(params); }
 };
 
 }
 
+#endif // __HEADSOCKET_H__
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef HEADSOCKET_IMPLEMENTATION
-#ifndef HEADSOCKET_IS_IMPLEMENTED
-#define HEADSOCKET_IS_IMPLEMENTED
+#ifndef __HEADSOCKET_H_IMPL__
+#define __HEADSOCKET_H_IMPL__
 
 #include <thread>
 #include <chrono>
@@ -843,7 +846,7 @@ void BaseTcpServer::disconnect(BaseTcpClient *client)
 {
   if (client)
   {
-    baseClientDisconnected(client);
+    clientDisconnected(client);
     _p->disconnectSemaphore.notify();
   }
 }
@@ -906,11 +909,11 @@ void BaseTcpServer::acceptThread()
     if (params.clientSocket != InvalidSocket)
     {
       bool failed = false;
-      if (clientHandshake(&params))
+      if (connectionHandshake(&params))
       {
         HEADSOCKET_LOCK(_p->connections);
         if (BaseTcpClient *newClient = clientAccept(&params))
-        { _p->connections->push_back(newClient); baseClientConnected(newClient); } else failed = true;
+        { _p->connections->push_back(newClient); clientConnected(newClient); } else failed = true;
       }
       else failed = true;
       if (failed) { CloseSocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
