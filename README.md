@@ -59,6 +59,7 @@ public:
             pushData(&length, sizeof(size_t));
         }
         
+        // Consume this data block
 	    return true;
     }
 }
@@ -144,7 +145,7 @@ When constructed, `BaseTcpServer` automaticaly spawns two helper threads; one fo
 ----------
 
 ### headsocket::`TcpServer<T>`
-Concrete implementation of `BaseTcpServer` that makes sure you are not working against `BaseTcpClient` instances, but rather with clients of specified type `<T>` (must be derived from `BaseTcpClient`). This is done by making sure that:
+Concrete implementation of `BaseTcpServer` that makes sure you are not working against `BaseTcpClient` instances, but rather with clients of specified type `<T>`, where `<T>` **must** be derived from `BaseTcpClient`. This is done by making sure that:
 
 - `BaseTcpServer::clientAccept` is overriden and returns new instances of `<T>`
 - `BaseTcpServer::clientConnected` is overriden and redirects all calls to a separate `clientConnected(T *client)` method
@@ -172,32 +173,50 @@ Public interface provides:
 ----------
 
 ### headsocket::`TcpClient`
-Concrete implementation of `BaseTcpClient`, allow sending and receiving data **synchronously**.
+Concrete implementation of `BaseTcpClient`, allows sending and receiving data **synchronously**.
 
 Public interface provides these extra methods:
 
 - `size_t` **`write(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*. Returns number of bytes written, or `BaseTcpClient::InvalidOperation` otherwise.
-- `bool` **`forceWrite(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from *ptr* - calls `write` method repeatedly to make sure all `length` bytes are sent by this one call. Returns `true` on success, `false` if there was an error.
 - `size_t` **`read(void *ptr, size_t length)`**: Reads up to *length* bytes into memory location *ptr*. Returns number of bytes recieved or `BaseTcpClient::InvalidOperation` otherwise.
+- `bool` **`forceWrite(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from 
+*ptr* - calls `write` method repeatedly to make sure all `length` bytes are sent by this one call. Returns `true` on success, `false` if there was an error.
 - `size_t` **`readLine(void *ptr, size_t length)`**: Reads line up to *length* characters long into *ptr*. Null terminator is added automatically. Returns number of characters received (including null terminator), **zero** on error.
 - `bool` **`forceRead(void *ptr, size_t length)`**: Similar to `forceWrite`, forcibly reads *length* bytes into *ptr* - calls `read` method repeatedly until all `length` bytes are received by this one call. Returns `true` on success, `false` on error.
 
 ----------
 
 ### headsocket::`AsyncTcpClient`
-*TODO*
+Another concrete implementation of `BaseTcpClient`, allows sending and receiving data **asynchronously**.
+
+Public interface provides these extra methods:
+
+- `void` **`pushData(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*.
+- `void` **`pushData(const char *text)`**: Writes (sends) string *text*.
+- `size_t` **`peekData()`** `const`: Returns number of bytes available for reading through `popData`.
+- `size_t` **`popData(void *ptr, size_t length)`**: Copies up to *length* received bytes into memory location *ptr*. Returns number of bytes copied.
+
+If you are not interested in polling the data through `peekData` and `popData`, you can implement your own asynchronous receiving handler:
+
+- `bool` **`asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length)`**: This will be called by the reading thread whenever there is a new complete block of data ready. Returning `true` signals that you've processed all the data and the data block can be removed. By returning `false`, the data block is kept in the reading queue and can be poped later through `popData` call. If you decide to keep the data in the reading queue, make sure you actually pop the data later via `popData`, otherwise it will be kept in memory forever. See  [**example 1**](#example1).
+
+When constructed, `AsyncTcpClient` spawns two threads for sending and receiving data. You can alter this behaviour by overriding `initAsyncThreads`. Actual sending and receiving is then handled by `asyncWriteHandler` and `asyncReadHandler` methods.
 
 ----------
 
 ### headsocket::`WebSocketClient`
+Extended implementation of `AsyncTcpClient` that handles WebSocket connections and hides away most communication details (parsing frame headers, frame continuation, etc.).
 
-*TODO*
+Public interface provides this extra method:
+
+- `size_t` **`peekData(Opcode *opcode)`** `const`: Same as base `AsyncTcpClient::peekData`, but can also report the type of the next available data block. Set *opcode* to `nullptr` if you are not interested, or use just base `AsyncTcpClient::peekData()` without parameters.
+
 
 ----------
 
 ### headsocket::`WebSocketServer<T>`
+Extended implementation of `TcpServer<T>`, where `<T>` **must** be derived from `WebSocketClient`. The only difference between this and `TcpServer<T>` is additional handling of WebSocket handshake. Rest of the behaviour is handled by `TcpServer<T>` itself.
 
-*TODO*
 
 ----------
 
