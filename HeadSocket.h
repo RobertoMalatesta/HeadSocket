@@ -261,6 +261,7 @@ class TcpServer : public BaseTcpServer
 {
 public:
   typedef BaseTcpServer Base;
+  typedef T Client;
 
   explicit TcpServer(int port) : Base(port) { }
   virtual ~TcpServer() { stop(); }
@@ -269,8 +270,8 @@ public:
 
 protected:
   bool connectionHandshake(ConnectionParams *params) override { return true; }
-  virtual void clientConnected(T *client) { }
-  virtual void clientDisconnected(T *client) { }
+  virtual void clientConnected(Client *client) { }
+  virtual void clientDisconnected(Client *client) { }
 
 private:
   enum { T_IsBaseTcpClient = T::IsBaseTcpClient };
@@ -932,15 +933,21 @@ void BaseTcpServer::acceptThread()
 
     if (params.clientSocket != InvalidSocket)
     {
+      BaseTcpClient *newClient = nullptr;
       bool failed = false;
       if (connectionHandshake(&params))
       {
         HEADSOCKET_LOCK(_p->connections);
-        if (BaseTcpClient *newClient = clientAccept(&params))
-        { _p->connections->push_back(newClient); clientConnected(newClient); } else failed = true;
+        if (newClient = clientAccept(&params))
+          _p->connections->push_back(newClient);
+        else
+          failed = true;
       }
       else failed = true;
-      if (failed) { CloseSocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
+      if (failed)
+      { CloseSocket(params.clientSocket); --_p->nextClientID; if (!_p->nextClientID) --_p->nextClientID; }
+      else
+        clientConnected(newClient);
     }
   }
 }
