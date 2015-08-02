@@ -525,19 +525,19 @@ struct DataBlockBuffer
   }
   void writeData(const void *ptr, size_t length)
   {
+    if (!length) return;
     buffer.resize(buffer.size() + length);
     memcpy(buffer.data() + buffer.size() - length, reinterpret_cast<const char *>(ptr), length);
     blocks.back().length += length;
   }
   size_t readData(void *ptr, size_t length)
   {
-    if (!ptr || !length || blocks.empty() || !blocks.front().isCompleted) return 0;
+    if (!ptr || blocks.empty() || !blocks.front().isCompleted) return 0;
     DataBlock &db = blocks.front();
     size_t result = db.length >= length ? length : db.length;
-    memcpy(ptr, buffer.data() + db.offset, result);
-    buffer.erase(buffer.begin(), buffer.begin() + result);
+    if (result) { memcpy(ptr, buffer.data() + db.offset, result); buffer.erase(buffer.begin(), buffer.begin() + result); }
     if (!(db.length -= result)) blocks.erase(blocks.begin()); else blocks.front().opcode = Opcode::Continuation;
-    for (auto &block : blocks) if (block.offset > db.offset) block.offset -= result;
+    if (result) for (auto &block : blocks) if (block.offset > db.offset) block.offset -= result;
     return result;
   }
   size_t peekData(Opcode *op = nullptr) const
@@ -1172,7 +1172,7 @@ AsyncTcpClient::~AsyncTcpClient()
 //---------------------------------------------------------------------------------------------------------------------
 void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode op)
 {
-  if (!ptr || !length) return;
+  if (!ptr) return;
   {
     HEADSOCKET_LOCK(_ap->writeBlocks);
     _ap->writeBlocks->blockBegin(op);
@@ -1214,6 +1214,7 @@ void AsyncTcpClient::writeThread()
 {
   setThreadName("AsyncTcpClient::writeThread");
   std::vector<uint8_t> buffer(1024 * 1024);
+
   while (_p->isConnected)
   {
     size_t written = 0;
@@ -1312,10 +1313,10 @@ size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
   {
     Opcode op;
     size_t toWrite = _ap->writeBlocks->peekData(&op);
-    if (!toWrite) break;
-    
     size_t toConsume = (length - 15) > FrameSizeLimit ? FrameSizeLimit : (length - 15);
     toConsume = toConsume > toWrite ? toWrite : toConsume;
+
+    printf("toWrite: %d\n", toWrite);
     
     FrameHeader header;
     header.fin = (toWrite - toConsume) == 0;
@@ -1329,6 +1330,7 @@ size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
     cursor += toConsume; length -= toConsume;
 
     if (header.fin) _ap->writeSemaphore.consume();
+    if (!_ap->writeBlocks->peekData(&op)) break;
   }
 
   return cursor - ptr;
