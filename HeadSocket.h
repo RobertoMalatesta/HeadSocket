@@ -1315,8 +1315,6 @@ size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
     size_t toWrite = _ap->writeBlocks->peekData(&op);
     size_t toConsume = (length - 15) > FrameSizeLimit ? FrameSizeLimit : (length - 15);
     toConsume = toConsume > toWrite ? toWrite : toConsume;
-
-    printf("toWrite: %d\n", toWrite);
     
     FrameHeader header;
     header.fin = (toWrite - toConsume) == 0;

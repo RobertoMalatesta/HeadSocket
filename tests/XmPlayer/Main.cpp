@@ -40,7 +40,7 @@ public:
       }
 
       fseek(fr, 0, SEEK_END);
-      size_t size = (size_t)(ftell(fr));
+      size_t size = static_cast<size_t>(ftell(fr));
       fseek(fr, 0, SEEK_SET);
 
       std::vector<uint8_t> fileData(size);
