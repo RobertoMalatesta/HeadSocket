@@ -134,6 +134,7 @@ struct DataBlock
 class Object
 {
 public:
+  enum { IsObject };
   virtual ~Object() { }
 
 protected:
@@ -206,6 +207,7 @@ public:
   bool operator!() const { return _ptr == nullptr; }
 
 private:
+  enum { T_IsObject = T::IsObject };
   void assign(T *ptr)
   {
     if (_ptr == ptr) return;
@@ -247,6 +249,7 @@ public:
   Iterator end() { return Iterator(this, _count); }
 
 private:
+  enum { T_IsBaseTcpClient = T::IsBaseTcpClient };
   const BaseTcpServer *_server;
   size_t _count;
 };
@@ -265,9 +268,12 @@ public:
   Enumerator<T> enumerateClients() const { return Enumerator<T>(this); }
 
 protected:
+  bool connectionHandshake(ConnectionParams *params) override { return true; }
   virtual void clientConnected(T *client) { }
   virtual void clientDisconnected(T *client) { }
 
+private:
+  enum { T_IsBaseTcpClient = T::IsBaseTcpClient };
   BaseTcpClient *clientAccept(ConnectionParams *params) override
   {
     T *newClient = new T(this, params);
@@ -275,7 +281,6 @@ protected:
     return newClient;
   }
 
-private:
   void clientConnected(headsocket::BaseTcpClient *client) override { clientConnected(reinterpret_cast<T *>(client)); }
   void clientDisconnected(headsocket::BaseTcpClient *client) override { clientDisconnected(reinterpret_cast<T *>(client)); }
 };
@@ -289,6 +294,7 @@ private:
 class BaseTcpClient : public Object
 {
 public:
+  enum { IsBaseTcpClient };
   static const size_t InvalidOperation = static_cast<size_t>(-1);
 
   virtual ~BaseTcpClient();
@@ -321,14 +327,16 @@ class TcpClient : public BaseTcpClient
 {
 public:
   typedef BaseTcpClient Base;
+  enum { IsTcpClient };
 
   TcpClient(const char *address, int port);
   TcpClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
   virtual ~TcpClient();
 
-  size_t write(const void *ptr, size_t length);
+  virtual size_t write(const void *ptr, size_t length);
+  virtual size_t read(void *ptr, size_t length);
+
   bool forceWrite(const void *ptr, size_t length);
-  size_t read(void *ptr, size_t length);
   size_t readLine(void *ptr, size_t length);
   bool forceRead(void *ptr, size_t length);
 };
@@ -339,20 +347,25 @@ class AsyncTcpClient : public BaseTcpClient
 {
 public:
   typedef BaseTcpClient Base;
+  enum { IsAsyncTcpClient };
 
   AsyncTcpClient(const char *address, int port);
   AsyncTcpClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
   virtual ~AsyncTcpClient();
 
-  void pushData(const void *ptr, size_t length, Opcode op = Opcode::Binary);
+  void pushData(const void *ptr, size_t length);
   void pushData(const char *text);
-  size_t peekData(Opcode *op = nullptr) const;
+  size_t peekData() const;
   size_t popData(void *ptr, size_t length);
 
 protected:
   virtual void initAsyncThreads();
   virtual size_t asyncWriteHandler(uint8_t *ptr, size_t length);
   virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
+
+  virtual bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) { return false; }
+
+  virtual void pushData(const void *ptr, size_t length, Opcode opcode);
 
   void killThreads();
 
@@ -371,11 +384,19 @@ public:
   static const size_t FrameSizeLimit = 128 * 1024;
 
   typedef AsyncTcpClient Base;
+  enum { IsWebSocketClient };
 
   WebSocketClient(const char *address, int port);
   WebSocketClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
   virtual ~WebSocketClient();
 
+  size_t peekData(Opcode *opcode) const;
+
+protected:
+  size_t asyncWriteHandler(uint8_t *ptr, size_t length) override;
+  size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
+
+private:
   struct FrameHeader
   {
     bool fin;
@@ -385,13 +406,6 @@ public:
     uint32_t maskingKey;
   };
 
-protected:
-  size_t asyncWriteHandler(uint8_t *ptr, size_t length) override;
-  size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
-
-  virtual bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length);
-
-private:
   size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
   size_t writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
 
@@ -411,6 +425,9 @@ public:
 
 protected:
   bool connectionHandshake(ConnectionParams *params) override { return Handshake::webSocket(params); }
+
+private:
+  enum { T_IsWebSocketClient = T::IsWebSocketClient };
 };
 
 }
@@ -1173,12 +1190,12 @@ AsyncTcpClient::~AsyncTcpClient()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode op)
+void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode opcode)
 {
   if (!ptr) return;
   {
     HEADSOCKET_LOCK(_ap->writeBlocks);
-    _ap->writeBlocks->blockBegin(op);
+    _ap->writeBlocks->blockBegin(opcode);
     _ap->writeBlocks->writeData(ptr, length);
     _ap->writeBlocks->blockEnd();
   }
@@ -1186,13 +1203,16 @@ void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode op)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+void AsyncTcpClient::pushData(const void *ptr, size_t length) { pushData(ptr, length, Opcode::Binary);  }
+
+//---------------------------------------------------------------------------------------------------------------------
 void AsyncTcpClient::pushData(const char *text) { pushData(text, text ? strlen(text) : 0, Opcode::Text); }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t AsyncTcpClient::peekData(Opcode *op) const
+size_t AsyncTcpClient::peekData() const
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
-  return _ap->readBlocks->peekData(op);
+  return _ap->readBlocks->peekData(nullptr);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1308,6 +1328,13 @@ WebSocketClient::WebSocketClient(BaseTcpServer *server, ConnectionParams *params
 WebSocketClient::~WebSocketClient() { }
 
 //---------------------------------------------------------------------------------------------------------------------
+size_t WebSocketClient::peekData(Opcode *opcode) const
+{
+  HEADSOCKET_LOCK(_ap->readBlocks);
+  return _ap->readBlocks->peekData(opcode);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 {
   uint8_t *cursor = ptr;
@@ -1384,16 +1411,16 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
       }
 
       if (_currentHeader.opcode == Opcode::Text || _currentHeader.opcode == Opcode::Binary)
-        if (asyncReceivedData(db, _ap->readBlocks->buffer.data() + db.offset, db.length)) _ap->readBlocks->blockRemove();
-        else _ap->readBlocks->blockEnd();
+      {
+        _ap->readBlocks->blockEnd();
+        if (asyncReceivedData(db, _ap->readBlocks->buffer.data() + db.offset, db.length))
+          _ap->readBlocks->blockRemove();
+      }
     }
   }
 
   return cursor - ptr;
 }
-
-//---------------------------------------------------------------------------------------------------------------------
-bool WebSocketClient::asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length) { return false; }
 
 //---------------------------------------------------------------------------------------------------------------------
 #define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
