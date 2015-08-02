@@ -223,7 +223,7 @@ template <typename T>
 class Enumerator
 {
 public:
-  Enumerator(const BaseTcpServer *server): _server(server) { _count = _server->addRefClients(); }
+  explicit Enumerator(const BaseTcpServer *server): _server(server) { _count = _server->addRefClients(); }
   ~Enumerator() { _server->releaseClients(); }
 
   const BaseTcpServer *getServer() const { return _server; }
@@ -352,7 +352,6 @@ protected:
   virtual void initAsyncThreads();
   virtual size_t asyncWriteHandler(uint8_t *ptr, size_t length);
   virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
-  virtual bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length);
 
   void killThreads();
 
@@ -388,6 +387,8 @@ public:
 protected:
   size_t asyncWriteHandler(uint8_t *ptr, size_t length) override;
   size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
+
+  virtual bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length);
 
 private:
   size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
@@ -668,7 +669,7 @@ size_t Encoding::base64(const void *src, size_t srcLength, void *dst, size_t dst
 
     for (size_t i = 0, j = 0, triplet = 0; i < srcLength; triplet = 0)
     {
-      for (size_t k = 0; k < 3; ++k) triplet = (triplet << 8) | (i < srcLength ? (uint8_t)input[i++] : 0);
+      for (size_t k = 0; k < 3; ++k) triplet = (triplet << 8) | (i < srcLength ? static_cast<uint8_t>(input[i++]) : 0);
       for (size_t k = 4; k--; ) output[j++] = encodingTable[(triplet >> k * 6) & 0x3F];
     }
 
@@ -748,8 +749,7 @@ bool Handshake::webSocket(ConnectionParams *params)
   SHA1::Digest8 digest; sha.getDigestBytes(digest);
   Encoding::base64(digest, 20, lineBuffer, 256);
 
-  std::string response =
-    "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
+  std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
   response += lineBuffer;
   response += "\n\n";
 
@@ -790,7 +790,7 @@ BaseTcpServer::BaseTcpServer(int port) : _p(new BaseTcpServerImpl())
 
   _p->serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-  if (bind(_p->serverSocket, (sockaddr *)&_p->local, sizeof(_p->local)) != 0) return;
+  if (bind(_p->serverSocket, reinterpret_cast<sockaddr *>(&_p->local), sizeof(_p->local)) != 0) return;
   if (listen(_p->serverSocket, 8)) return;
 
   _p->isRunning = true;
@@ -899,7 +899,7 @@ void BaseTcpServer::acceptThread()
   while (_p->isRunning)
   {
     ConnectionParams params;
-    params.clientSocket = accept(_p->serverSocket, (struct sockaddr *)&params.from, NULL);
+    params.clientSocket = accept(_p->serverSocket, reinterpret_cast<struct sockaddr *>(&params.from), nullptr);
     params.id = _p->nextClientID++; if (!_p->nextClientID) ++_p->nextClientID;
     if (!_p->isRunning) break;
 
@@ -956,7 +956,7 @@ struct BaseTcpClientImpl
 BaseTcpClient::BaseTcpClient(const char *address, int port)
   : _p(new BaseTcpClientImpl())
 {
-  struct addrinfo *result = NULL, *ptr = NULL, hints;
+  struct addrinfo *result = nullptr, *ptr = nullptr, hints;
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -969,7 +969,7 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
   if (getaddrinfo(address, buff, &hints, &result))
     return;
 
-  for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
+  for (ptr = result; ptr != nullptr; ptr = ptr->ai_next)
   {
     _p->clientSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
     if (_p->clientSocket == InvalidSocket)
@@ -1062,7 +1062,7 @@ TcpClient::~TcpClient() { }
 size_t TcpClient::write(const void *ptr, size_t length)
 {
   if (!ptr || !length) return 0;
-  int result = send(_p->clientSocket, (const char *)ptr, length, 0);
+  int result = send(_p->clientSocket, static_cast<const char *>(ptr), length, 0);
   if (!result || result == SocketError) return 0;
 
   return static_cast<size_t>(result);
@@ -1073,14 +1073,14 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
 {
   if (!ptr) return true;
 
-  const char *chPtr = (const char *)ptr;
+  const char *chPtr = static_cast<const char *>(ptr);
 
   while (length)
   {
     int result = send(_p->clientSocket, chPtr, length, 0);
     if (!result || result == SocketError) return false;
 
-    length -= (size_t)result;
+    length -= static_cast<size_t>(result);
     chPtr += result;
   }
 
@@ -1091,7 +1091,7 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
 size_t TcpClient::read(void *ptr, size_t length)
 {
   if (!ptr || !length) return 0;
-  int result = recv(_p->clientSocket, (char *)ptr, length, 0);
+  int result = recv(_p->clientSocket, static_cast<char *>(ptr), length, 0);
   if (!result || result == SocketError) return 0;
 
   return static_cast<size_t>(result);
@@ -1122,13 +1122,13 @@ bool TcpClient::forceRead(void *ptr, size_t length)
 {
   if (!ptr) return true;
 
-  char *chPtr = (char *)ptr;
+  char *chPtr = static_cast<char *>(ptr);
   while (length)
   {
     int result = recv(_p->clientSocket, chPtr, length, 0);
     if (!result || result == SocketError) return false;
 
-    length -= (size_t)result; chPtr += result;
+    length -= static_cast<size_t>(result); chPtr += result;
   }
 
   return true;
@@ -1254,9 +1254,6 @@ size_t AsyncTcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
   // TODO
   return length;
 }
-
-//---------------------------------------------------------------------------------------------------------------------
-bool AsyncTcpClient::asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length) { return false; }
 
 //---------------------------------------------------------------------------------------------------------------------
 void AsyncTcpClient::readThread()
@@ -1391,6 +1388,9 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 
   return cursor - ptr;
 }
+
+//---------------------------------------------------------------------------------------------------------------------
+bool WebSocketClient::asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length) { return false; }
 
 //---------------------------------------------------------------------------------------------------------------------
 #define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
