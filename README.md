@@ -126,7 +126,20 @@ int main()
 ----------
 
 ### headsocket::`BaseTcpServer`
-*TODO*
+Abstract class for handling incomming connections. You should never create an instance of it directly, since it acts only as a factory base for derived classes, such as `TcpServer<T>` or `WebSocketServer<T>`. Public interface provides only those methods:
+
+- `void` **`stop()`** : Stops the server, disconnects all clients.
+- `bool` **`isRunning()`** `const`: Returns `true` if server is still running.
+- `void` **`disconnect(BaseTcpClient *client)`**: Forcibly disconnects a client.
+
+If you want to derive your own `BaseTcpServer`, you are required to implement these methods:
+
+- `bool` **`connectionHandshake(ConnectionParams *params)`**: Right after server accepts new socket connection, you can optionaly do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
+- `BaseTcpClient *` **`clientAccept(ConnectionParams *params)`**: Called by the server after handshake is successfuly done. This is a factory method for creating your own instances of `BaseTcpClient` classes. If you are not able to create client instance, return `nullptr`.
+- `void` **`clientConnected(BaseTcpClient *client)`**: Called when new client is successfuly created by previous `clientAccept` call.
+- `void` **`clientDisconnected(BaseTcpClient *client)`**: Called before client is disconnected by server.
+
+When constructed, `BaseTcpServer` automaticaly spawns two helper threads; one for accepting incomming connections and one for closing disconnected clients. You can take a look at `BaseTcpServer::acceptThread` implementation to see how the new incomming connections are handled with `connectionHandshake`, `clientAccept` and `clientConnected` calls.
 
 ----------
 
