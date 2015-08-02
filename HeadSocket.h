@@ -154,7 +154,7 @@ public:
 
   void stop();
   bool isRunning() const;
-  void disconnect(BaseTcpClient *client);
+  bool disconnect(BaseTcpClient *client);
 
 protected:
   explicit BaseTcpServer(int port);
@@ -263,7 +263,7 @@ public:
   typedef BaseTcpServer Base;
 
   explicit TcpServer(int port) : Base(port) { }
-  virtual ~TcpServer() { }
+  virtual ~TcpServer() { stop(); }
 
   Enumerator<T> enumerateClients() const { return Enumerator<T>(this); }
 
@@ -299,7 +299,7 @@ public:
 
   virtual ~BaseTcpClient();
 
-  void disconnect();
+  bool disconnect();
   bool isConnected() const;
 
   BaseTcpServer *getServer() const;
@@ -422,6 +422,7 @@ public:
   typedef TcpServer<T> Base;
 
   WebSocketServer(int port): Base(port) { }
+  virtual ~WebSocketServer() { stop(); }
 
 protected:
   bool connectionHandshake(ConnectionParams *params) override { return Handshake::webSocket(params); }
@@ -859,13 +860,19 @@ void BaseTcpServer::stop()
 bool BaseTcpServer::isRunning() const { return _p->isRunning; }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::disconnect(BaseTcpClient *client)
+bool BaseTcpServer::disconnect(BaseTcpClient *client)
 {
+  bool found = false;
   if (client)
   {
-    clientDisconnected(client);
-    _p->disconnectSemaphore.notify();
+    {
+      HEADSOCKET_LOCK(_p->connections);
+      for (size_t i = 0, S = _p->connections->size(); i < S; ++i)
+        if (_p->connections->at(i).get() == client) { found = true; break; }
+    }
+    if (found && !client->disconnect()) { clientDisconnected(client); _p->disconnectSemaphore.notify(); }
   }
+  return found;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1043,9 +1050,10 @@ void BaseTcpClient::release() const { if (!(--_p->refCount)) delete this; }
 size_t BaseTcpClient::getNumRefs() const { return _p->refCount; }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpClient::disconnect()
+bool BaseTcpClient::disconnect()
 {
-  if (_p->isConnected.exchange(false))
+  bool wasConnected = _p->isConnected.exchange(false);
+  if (wasConnected)
   {
     if (_p->clientSocket != InvalidSocket)
     {
@@ -1056,6 +1064,7 @@ void BaseTcpClient::disconnect()
     if (_p->server)
       _p->server->disconnect(this);
   }
+  return wasConnected;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
