@@ -79,7 +79,7 @@ int main()
 
 ----------
 
-<a id="example1"></a>
+<a id="example2"></a>
 ### Quickstart example 2 *(semi-synchronous)*
 This example has server accepting clients asynchronously, but reading client's data is done by polling (clients still send and receive all the data asynchronously in the background):
 ```cpp
@@ -144,17 +144,43 @@ When constructed, `BaseTcpServer` automaticaly spawns two helper threads; one fo
 ----------
 
 ### headsocket::`TcpServer<T>`
-*TODO*
+Concrete implementation of `BaseTcpServer` that makes sure you are not working against `BaseTcpClient` instances, but rather with clients of specified type `<T>` (must be derived from `BaseTcpClient`). This is done by making sure that:
+
+- `BaseTcpServer::clientAccept` is overriden and returns new instances of `<T>`
+- `BaseTcpServer::clientConnected` is overriden and redirects all calls to a separate `clientConnected(T *client)` method
+- `BaseTcpServer::clientDisconnected` is overriden and redirects as well
+- all three methods are made **private**
+
+For convenience, `BaseTcpServer::connectionHandshake` returns just `true`.
+
+Public interface provides this extra method:
+
+- `Enumerator<T>` **`enumerateClients()`** `const`: Returns enumerator for iterating through all clients. Look at [**example 2**](#example1) to see how it can be used.
 
 ----------
 
 ### headsocket::`BaseTcpClient`
-*TODO*
+Abstract class for connected clients with very basic interface. You should not try to create instance of this class directly, since there are no methods for sending or receiving data.
+
+Public interface provides:
+
+- `void` **`disconnect()`**: Disconnects this client from the server.
+- `bool` **`isConnected()`** `const`: Returns `true` if client is still connected.
+- `BaseTcpServer *` **`getServer()`** `const`: Returns server instance which originaly created this client.
+- `size_t` **`getID()`** `const`: Returns ID assigned by server.
 
 ----------
 
 ### headsocket::`TcpClient`
-*TODO*
+Concrete implementation of `BaseTcpClient`, allow sending and receiving data **synchronously**.
+
+Public interface provides these extra methods:
+
+- `size_t` **`write(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*. Returns number of bytes written, or `BaseTcpClient::InvalidOperation` otherwise.
+- `bool` **`forceWrite(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from *ptr* - calls `write` method repeatedly to make sure all `length` bytes are sent by this one call. Returns `true` on success, `false` if there was an error.
+- `size_t` **`read(void *ptr, size_t length)`**: Reads up to *length* bytes into memory location *ptr*. Returns number of bytes recieved or `BaseTcpClient::InvalidOperation` otherwise.
+- `size_t` **`readLine(void *ptr, size_t length)`**: Reads line up to *length* characters long into *ptr*. Null terminator is added automatically. Returns number of characters received (including null terminator), **zero** on error.
+- `bool` **`forceRead(void *ptr, size_t length)`**: Similar to `forceWrite`, forcibly reads *length* bytes into *ptr* - calls `read` method repeatedly until all `length` bytes are received by this one call. Returns `true` on success, `false` on error.
 
 ----------
 
