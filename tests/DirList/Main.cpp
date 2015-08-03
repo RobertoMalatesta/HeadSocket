@@ -6,8 +6,6 @@
 
 #include "Utils.h"
 
-headsocket::CriticalSection consoleCS;
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class Client : public headsocket::WebSocketClient
@@ -24,7 +22,6 @@ public:
 
     // Print command:
     {
-      HEADSOCKET_LOCK(consoleCS);
       std::cout << "Client " << getID() << " received: " << cmd << std::endl;
     }
 
@@ -107,13 +104,11 @@ public:
 
   void clientConnected(Client *client) override
   {
-    HEADSOCKET_LOCK(consoleCS);
     std::cout << "Client " << client->getID() << " connected!" << std::endl;
   }
 
   void clientDisconnected(Client *client) override
   {
-    HEADSOCKET_LOCK(consoleCS);
     std::cout << "Client " << client->getID() << " disconnected!" << std::endl;
   }
 };
