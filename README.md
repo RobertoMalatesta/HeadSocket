@@ -22,6 +22,9 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 ### What is this good for?
 I needed an easy way to quickly create remote connection interfaces. By embedding small WebSocket server into my code, I can communicate with it from almost any browser, any platform and any place over network. Writing simple debugging tools, remote controllers or profilers gets much easier, because all I need is just a bit of HTML and JavaScript!
 
+### What is this NOT good for?
+If you are looking for something *production ready*, safe and fast, you should probably use [C++ Web Toolkit](http://www.webtoolkit.eu/) or [WebSocket++](https://github.com/zaphoyd/websocketpp). This library is meant to be used just for experimental and simple debugging purposes.
+
 ----------
 
 <a id="example1"></a>
@@ -35,20 +38,20 @@ In this example server accepts and creates client connections asynchronously and
 
 using namespace headsocket;
 
-class Client : public WebSocketClient
+class Client : public web_socket_client
 {
 public:
-    HEADSOCKET_CLIENT_CTOR(Client, WebSocketClient);
+    HEADSOCKET_CLIENT_CTOR(Client, web_socket_client);
 
-    bool asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length) override
+    bool async_received_data(const data_block &db, uint8_t *ptr, size_t length) override
     {
-    	if (db.opcode == Opcode::Text)
+    	if (db.op == opcode::text)
         {
         	// Handle text message (null-terminated string is in 'ptr')
             // ...
             
             // Send text response back to client
-            pushData("Thank you for this beautiful message!");
+            push("Thank you for this beautiful message!");
         }
         else
         {
@@ -56,7 +59,7 @@ public:
             // ...
             
 			// Send binary response back to client
-            pushData(&length, sizeof(size_t));
+            push(&length, sizeof(size_t));
         }
         
         // Consume this data block
@@ -69,9 +72,9 @@ public:
 int main()
 {
 	int port = 12345;
-    WebSocketServer<Client> server(port);
+    web_socket_server<Client> server(port);
     
-    if (server.isRunning())
+    if (server.is_running())
     	std::getChar();
         
     return 0;
@@ -94,7 +97,7 @@ using namespace headsocket;
 int main()
 {
 	int port = 12345;
-    WebSocketServer<WebSocketClient> server(port);
+    web_socket_server<web_socket_client> server(port);
 
 	// Buffer for transfering data blocks out of connected clients
 	std::vector<uint8_t> buffer;
@@ -102,16 +105,16 @@ int main()
 	// Your main loop
 	while (true)
     {
-    	for (auto client : server.enumerateClients())
+    	for (auto client : server.clients())
     	{
     		// Loop until there is no new data block available (returned size is 0)
-    		while (size_t size = client->peekData())
+    		while (size_t size = client->peek())
     		{
     			// Resize buffer accordingly
     			buffer.resize(size);
     			
     			// Copy next available client's data block into our buffer
-    			client->popData(buffer.data(), size);
+    			client->pop(buffer.data(), size);
     			
     			// ... process the buffer!
     		}
@@ -126,96 +129,96 @@ int main()
 
 ----------
 
-### headsocket::`BaseTcpServer`
-Abstract class for handling incomming connections. You should never create an instance of it directly, since it acts only as a factory base for derived classes, such as `TcpServer<T>` or `WebSocketServer<T>`. Public interface provides only those methods:
+### headsocket::`basic_tcp_server`
+Abstract class for handling incomming connections. You should never create an instance of it directly, since it acts only as a factory base for derived classes, such as `tcp_server<T>` or `web_socket_server<T>`. Public interface provides only those methods:
 
 - `void` **`stop()`** : Stops the server, disconnects all clients.
-- `bool` **`isRunning()`** `const`: Returns `true` if server is still running.
-- `void` **`disconnect(BaseTcpClient *client)`**: Forcibly disconnects a client.
+- `bool` **`is_running()`** `const`: Returns `true` if server is still running.
+- `void` **`disconnect(basic_tcp_client *client)`**: Forcibly disconnects a client.
 
 If you want to derive your own `BaseTcpServer`, you are required to implement these methods:
 
-- `bool` **`connectionHandshake(ConnectionParams *params)`**: Right after server accepts new socket connection, you can optionaly do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
-- `BaseTcpClient *` **`clientAccept(ConnectionParams *params)`**: Called by the server after handshake is successfuly done. This is a factory method for creating your own instances of `BaseTcpClient` classes. If you are not able to create client instance, return `nullptr`.
-- `void` **`clientConnected(BaseTcpClient *client)`**: Called when new client is successfuly created by previous `clientAccept` call.
-- `void` **`clientDisconnected(BaseTcpClient *client)`**: Called before client is disconnected by server.
+- `bool` **`handshake(ConnectionParams *params)`**: Right after server accepts new socket connection, you can optionaly do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
+- `basic_tcp_client *` **`accept(ConnectionParams *params)`**: Called by the server after handshake is successfuly done. This is a factory method for creating your own instances of `BaseTcpClient` classes. If you are not able to create client instance, return `nullptr`.
+- `void` **`client_connected(basic_tcp_client *client)`**: Called when new client is successfuly created by previous `clientAccept` call.
+- `void` **`client_disconnected(basic_tcp_client *client)`**: Called before client is disconnected by server.
 
-When constructed, `BaseTcpServer` automaticaly spawns two helper threads; one for accepting incomming connections and one for closing disconnected clients. You can take a look at `BaseTcpServer::acceptThread` implementation to see how the new incomming connections are handled with `connectionHandshake`, `clientAccept` and `clientConnected` calls.
+When constructed, `basic_tcp_server` automaticaly spawns two helper threads; one for accepting incomming connections and one for closing disconnected clients. You can take a look at `basic_tcp_server::acceptThread` implementation to see how the new incomming connections are handled with `handshake`, `accept` and `client_connected` calls.
 
 ----------
 
-### headsocket::`TcpServer<T>`
-Concrete implementation of `BaseTcpServer` that makes sure you are not working against `BaseTcpClient` instances, but rather with clients of specified type `<T>`, where `<T>` **must** be derived from `BaseTcpClient`. This is done by making sure that:
+### headsocket::`tcp_server<T>`
+Concrete implementation of `basic_tcp_server` that makes sure you are not working against `basic_tcp_client` instances, but rather with clients of specified type `<T>`, where `<T>` **must** be derived from `basic_tcp_client`. This is done by making sure that:
 
-- `BaseTcpServer::clientAccept` is overriden and returns new instances of `<T>`
-- `BaseTcpServer::clientConnected` is overriden and redirects all calls to a separate `clientConnected(T *client)` method
-- `BaseTcpServer::clientDisconnected` is overriden and redirects as well
+- `basic_tcp_server::accept` is overriden and returns new instances of `<T>`
+- `basic_tcp_server::client_connected` is overriden and redirects all calls to a separate `client_connected(T *client)` method
+- `basic_tcp_server::client_disconnected` is overriden and redirects as well
 - all three methods are made **private**
 
-For convenience, `BaseTcpServer::connectionHandshake` returns just `true`.
+For convenience, `basic_tcp_server::handshake` returns just `true`.
 
 Public interface provides this extra method:
 
-- `Enumerator<T>` **`enumerateClients()`** `const`: Returns enumerator for iterating through all clients. Look at [**example 2**](#example1) to see how it can be used.
+- `detail::enumerator<T>` **`clients()`** `const`: Returns enumerator for iterating through all clients. Look at [**example 2**](#example2) to see how it can be used.
 
 ----------
 
-### headsocket::`BaseTcpClient`
+### headsocket::`basic_tcp_client`
 Abstract class for connected clients with very basic interface. You should not try to create instance of this class directly, since there are no methods for sending or receiving data.
 
 Public interface provides:
 
 - `void` **`disconnect()`**: Disconnects this client from the server.
-- `bool` **`isConnected()`** `const`: Returns `true` if client is still connected.
-- `BaseTcpServer *` **`getServer()`** `const`: Returns server instance which originaly created this client.
-- `size_t` **`getID()`** `const`: Returns ID assigned by server.
+- `bool` **`is_connected()`** `const`: Returns `true` if client is still connected.
+- `basic_tcp_server *` **`server()`** `const`: Returns server instance which originaly created this client. Could be `nullptr` if client was created manually.
+- `size_t` **`id()`** `const`: Returns ID assigned by server.
 
 ----------
 
-### headsocket::`TcpClient`
-Concrete implementation of `BaseTcpClient`, allows sending and receiving data **synchronously**.
+### headsocket::`tcp_client`
+Concrete implementation of `basic_tcp_client`, allows sending and receiving data **synchronously**.
 
 Public interface provides these extra methods:
 
-- `size_t` **`write(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*. Returns number of bytes written, or `BaseTcpClient::InvalidOperation` otherwise.
-- `size_t` **`read(void *ptr, size_t length)`**: Reads up to *length* bytes into memory location *ptr*. Returns number of bytes recieved or `BaseTcpClient::InvalidOperation` otherwise.
-- `bool` **`forceWrite(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from 
+- `size_t` **`write(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*. Returns number of bytes written, or `basic_tcp_client::invalid_operation` otherwise.
+- `size_t` **`read(void *ptr, size_t length)`**: Reads up to *length* bytes into memory location *ptr*. Returns number of bytes recieved or `basic_tcp_client::invalid_operation` otherwise.
+- `bool` **`force_write(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from 
 *ptr* - calls `write` method repeatedly to make sure all `length` bytes are sent by this one call. Returns `true` on success, `false` if there was an error.
-- `size_t` **`readLine(void *ptr, size_t length)`**: Reads line up to *length* characters long into *ptr*. Null terminator is added automatically. Returns number of characters received (including null terminator), **zero** on error.
-- `bool` **`forceRead(void *ptr, size_t length)`**: Similar to `forceWrite`, forcibly reads *length* bytes into *ptr* - calls `read` method repeatedly until all `length` bytes are received by this one call. Returns `true` on success, `false` on error.
+- `size_t` **`read_line(void *ptr, size_t length)`**: Reads line up to *length* characters long into *ptr*. Null terminator is added automatically. Returns number of characters received (including null terminator), **zero** on error.
+- `bool` **`force_read(void *ptr, size_t length)`**: Similar to `forceWrite`, forcibly reads *length* bytes into *ptr* - calls `read` method repeatedly until all `length` bytes are received by this one call. Returns `true` on success, `false` on error.
 
 ----------
 
-### headsocket::`AsyncTcpClient`
-Another concrete implementation of `BaseTcpClient`, allows sending and receiving data **asynchronously**.
+### headsocket::`async_tcp_client`
+Another concrete implementation of `basic_tcp_client`, allows sending and receiving data **asynchronously**.
 
 Public interface provides these extra methods:
 
-- `void` **`pushData(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*.
-- `void` **`pushData(const char *text)`**: Writes (sends) string *text*.
-- `size_t` **`peekData()`** `const`: Returns number of bytes available for reading through `popData`.
-- `size_t` **`popData(void *ptr, size_t length)`**: Copies up to *length* received bytes into memory location *ptr*. Returns number of bytes copied.
+- `void` **`push(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*.
+- `void` **`push(const char *text)`**: Writes (sends) string *text*.
+- `size_t` **`peek()`** `const`: Returns number of bytes available for reading through `pop`.
+- `size_t` **`pop(void *ptr, size_t length)`**: Copies up to *length* received bytes into memory location *ptr*. Returns number of bytes copied.
 
-If you are not interested in polling the data through `peekData` and `popData`, you can implement your own asynchronous receiving handler:
+If you are not interested in polling the data through `peek` and `pop`, you can implement your own asynchronous receiving handler:
 
-- `bool` **`asyncReceivedData(const DataBlock &db, uint8_t *ptr, size_t length)`**: This will be called by the reading thread whenever there is a new complete block of data ready. Returning `true` signals that you've processed all the data and the data block can be removed. By returning `false`, the data block is kept in the reading queue and can be poped later through `popData` call. If you decide to keep the data in the reading queue, make sure you actually pop the data later via `popData`, otherwise it will be kept in memory forever. See  [**example 1**](#example1).
+- `bool` **`async_received_data(const data_block &db, uint8_t *ptr, size_t length)`**: This will be called by the reading thread whenever there is a new complete block of data ready. Returning `true` signals that you've processed all the data and the data block can be removed. By returning `false`, the data block is kept in the reading queue and can be poped later through `pop` call. If you decide to keep the data in the reading queue, make sure you actually pop the data later via `pop`, otherwise it will be kept in memory forever. See  [**example 1**](#example1).
 
-When constructed, `AsyncTcpClient` spawns two threads for sending and receiving data. You can alter this behaviour by overriding `initAsyncThreads`. Actual sending and receiving is then handled by `asyncWriteHandler` and `asyncReadHandler` methods.
+When constructed, `async_tcp_client` spawns two threads for sending and receiving data. You can alter this behaviour by overriding `init_threads`. Actual sending and receiving is then handled by `async_write_handler` and `async_read_handler` methods.
 
 ----------
 
-### headsocket::`WebSocketClient`
-Extended implementation of `AsyncTcpClient` that handles WebSocket connections and hides away most communication details (parsing frame headers, frame continuation, etc.).
+### headsocket::`web_socket_client`
+Extended implementation of `async_tcp_client` that handles WebSocket connections and hides away most communication details (parsing frame headers, frame continuation, etc.).
 
 Public interface provides this extra method:
 
-- `size_t` **`peekData(Opcode *opcode)`** `const`: Same as base `AsyncTcpClient::peekData`, but can also report the type of the next available data block. Set *opcode* to `nullptr` if you are not interested, or use just base `AsyncTcpClient::peekData()` without parameters.
+- `size_t` **`peek(opcode *op)`** `const`: Same as base `async_tcp_client::peek`, but can also report the type of the next available data block. Set *op* to `nullptr` if you are not interested, or use just base `async_tcp_client::peek()` without parameters.
 
 
 ----------
 
-### headsocket::`WebSocketServer<T>`
-Extended implementation of `TcpServer<T>`, where `<T>` **must** be derived from `WebSocketClient`. The only difference between this and `TcpServer<T>` is additional handling of WebSocket handshake. Rest of the behaviour is handled by `TcpServer<T>` itself.
+### headsocket::`web_socket_server<T>`
+Extended implementation of `tcp_server<T>`, where `<T>` **must** be derived from `web_socket_client`. The only difference between this and `tcp_server<T>` is additional handling of WebSocket handshake. Rest of the behaviour is handled by `tcp_server<T>` itself.
 
 
 ----------
