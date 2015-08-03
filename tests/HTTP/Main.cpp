@@ -10,7 +10,7 @@ public:
   HEADSOCKET_SERVER_CTOR(HTTPServer, headsocket::tcp_server<headsocket::tcp_client>);
 
 protected:
-  void client_connected(client_type *client) override
+  void client_connected(client_t *client) override
   {
     std::cout << "Client " << client->id() << " connected!" << std::endl;
 

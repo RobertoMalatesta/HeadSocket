@@ -64,6 +64,7 @@ class async_tcp_client;
 namespace detail {
   
 /* Forward declarations */
+struct connection_impl;
 struct basic_tcp_server_impl;
 struct basic_tcp_client_impl;
 struct async_tcp_client_impl;
@@ -166,6 +167,27 @@ static bool websocket_handshake(ConnectionParams *params);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+class connection
+{
+public:
+  connection(const detail::connection_impl &impl);
+  ~connection();
+
+  detail::connection_impl *impl() const { return _p.ptr; }
+
+  size_t write(const void *ptr, size_t length);
+  size_t read(void *ptr, size_t length);
+
+  bool force_write(const void *ptr, size_t length);
+  size_t read_line(void *ptr, size_t length);
+  bool force_read(void *ptr, size_t length);
+
+private:
+  detail::holder<detail::connection_impl> _p;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 enum class opcode
 {
   continuation = 0x00,
@@ -191,16 +213,6 @@ struct data_block
   {
 
   }
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-class Connection
-{
-public:
-
-private:
-  struct ConnectionImpl *_p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -248,18 +260,18 @@ template <typename T>
 class tcp_server : public basic_tcp_server
 {
 public:
-  typedef basic_tcp_server base_type;
-  typedef T client_type;
+  typedef basic_tcp_server base_t;
+  typedef T client_t;
 
   explicit tcp_server(int port)
-    : base_type(port)
+    : base_t(port)
   {
 
   }
 
   virtual ~tcp_server()
   {
-    stop();
+    base_t::stop();
   }
 
   detail::enumerator<T> clients() const
@@ -273,12 +285,12 @@ protected:
     return true;
   }
 
-  virtual void client_connected(client_type *client)
+  virtual void client_connected(client_t *client)
   {
 
   }
 
-  virtual void client_disconnected(client_type *client)
+  virtual void client_disconnected(client_t *client)
   {
 
   }
@@ -299,12 +311,12 @@ private:
     return newClient;
   }
 
-  void client_connected(headsocket::basic_tcp_client *client) override
+  void client_connected(basic_tcp_client *client) override
   {
     client_connected(reinterpret_cast<T *>(client));
   }
 
-  void client_disconnected(headsocket::basic_tcp_client *client) override
+  void client_disconnected(basic_tcp_client *client) override
   {
     client_disconnected(reinterpret_cast<T *>(client));
   }
@@ -335,7 +347,7 @@ protected:
   friend class basic_tcp_server;
 
   basic_tcp_client(const char *address, int port);
-  basic_tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
+  basic_tcp_client(basic_tcp_server *server, ConnectionParams *params);
 
   detail::holder<detail::basic_tcp_client_impl> _p;
 };
@@ -345,11 +357,11 @@ protected:
 class tcp_client : public basic_tcp_client
 {
 public:
-  typedef basic_tcp_client base_type;
+  typedef basic_tcp_client base_t;
   enum { is_tcp_client };
 
   tcp_client(const char *address, int port);
-  tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
+  tcp_client(basic_tcp_server *server, ConnectionParams *params);
 
   virtual ~tcp_client();
 
@@ -366,11 +378,11 @@ public:
 class async_tcp_client : public basic_tcp_client
 {
 public:
-  typedef basic_tcp_client base_type;
+  typedef basic_tcp_client base_t;
   enum { is_async_tcp_client };
 
   async_tcp_client(const char *address, int port);
-  async_tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
+  async_tcp_client(basic_tcp_server *server, ConnectionParams *params);
 
   virtual ~async_tcp_client();
 
@@ -384,7 +396,7 @@ protected:
   virtual size_t async_write_handler(uint8_t *ptr, size_t length);
   virtual size_t async_read_handler(uint8_t *ptr, size_t length);
 
-  virtual bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length)
+  virtual bool async_received_data(const data_block &db, uint8_t *ptr, size_t length)
   {
     return false;
   }
@@ -407,11 +419,11 @@ class web_socket_client : public async_tcp_client
 public:
   static const size_t frame_size_limit = 128 * 1024;
 
-  typedef async_tcp_client base_type;
+  typedef async_tcp_client base_t;
   enum { is_web_socket_client };
 
   web_socket_client(const char *address, int port);
-  web_socket_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
+  web_socket_client(basic_tcp_server *server, ConnectionParams *params);
 
   virtual ~web_socket_client();
 
@@ -434,8 +446,8 @@ private:
     size_t read(const uint8_t *ptr, size_t length);
   };
 
-  size_t _payloadSize = 0;
-  frame_header _currentHeader;
+  size_t _payload_size = 0;
+  frame_header _current_header;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -444,17 +456,17 @@ template <typename T>
 class web_socket_server : public tcp_server<T>
 {
 public:
-  typedef tcp_server<T> base_type;
+  typedef tcp_server<T> base_t;
 
   web_socket_server(int port)
-    : base_type(port)
+    : base_t(port)
   {
 
   }
 
   virtual ~web_socket_server()
   {
-    stop();
+    base_t::stop();
   }
 
 protected:
@@ -480,7 +492,6 @@ private:
 #include <thread>
 #include <atomic>
 #include <vector>
-#include <string>
 #include <mutex>
 #include <condition_variable>
 #include <memory>
@@ -561,12 +572,12 @@ public:
 
   void process_byte(uint8_t octet)
   {
-    _block[_blockByteIndex++] = octet;
-    ++_byteCount;
+    _block[_block_byte_index++] = octet;
+    ++_byte_count;
 
-    if (_blockByteIndex == 64)
+    if (_block_byte_index == 64)
     {
-      _blockByteIndex = 0;
+      _block_byte_index = 0;
       process_block();
     }
   }
@@ -586,19 +597,19 @@ public:
 
   const uint32_t *get_digest(digest32_t digest)
   {
-    size_t bitCount = _byteCount * 8;
+    size_t bitCount = _byte_count * 8;
     process_byte(0x80);
 
-    if (_blockByteIndex > 56)
+    if (_block_byte_index > 56)
     {
-      while (_blockByteIndex != 0)
+      while (_block_byte_index != 0)
         process_byte(0);
 
-      while (_blockByteIndex < 56)
+      while (_block_byte_index < 56)
         process_byte(0);
     }
     else
-      while (_blockByteIndex < 56)
+      while (_block_byte_index < 56)
         process_byte(0);
 
     process_byte(0);
@@ -663,37 +674,37 @@ private:
 
   digest32_t _digest;
   uint8_t _block[64];
-  size_t _blockByteIndex = 0;
-  size_t _byteCount = 0;
+  size_t _block_byte_index = 0;
+  size_t _byte_count = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct encoding
 {
-  static size_t base64(const void *src, size_t srcLength, void *dst, size_t dstLength)
+  static size_t base64(const void *src, size_t src_length, void *dst, size_t dst_length)
   {
-    if (!src || !srcLength || !dst || !dstLength)
+    if (!src || !src_length || !dst || !dst_length)
       return 0;
 
-    static const char *encodingTable = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    static size_t modTable[] = { 0, 2, 1 }, result = 4 * ((srcLength + 2) / 3);
+    static const char *encoding_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static size_t mod_table[] = { 0, 2, 1 }, result = 4 * ((src_length + 2) / 3);
 
-    if (result <= dstLength - 1)
+    if (result <= dst_length - 1)
     {
       const uint8_t *input = reinterpret_cast<const uint8_t *>(src);
       uint8_t *output = reinterpret_cast<uint8_t *>(dst);
 
-      for (size_t i = 0, j = 0, triplet = 0; i < srcLength; triplet = 0)
+      for (size_t i = 0, j = 0, triplet = 0; i < src_length; triplet = 0)
       {
         for (size_t k = 0; k < 3; ++k)
-          triplet = (triplet << 8) | (i < srcLength ? static_cast<uint8_t>(input[i++]) : 0);
+          triplet = (triplet << 8) | (i < src_length ? static_cast<uint8_t>(input[i++]) : 0);
 
         for (size_t k = 4; k--;)
-          output[j++] = encodingTable[(triplet >> k * 6) & 0x3F];
+          output[j++] = encoding_table[(triplet >> k * 6) & 0x3F];
       }
 
-      for (size_t i = 0; i < modTable[srcLength % 3]; i++)
+      for (size_t i = 0; i < mod_table[src_length % 3]; i++)
         output[result - 1 - i] = '=';
 
       output[result] = 0;
@@ -996,6 +1007,31 @@ bool detail::websocket_handshake(ConnectionParams *params)
   response += "\n\n";
 
   return send(params->clientSocket, response.c_str(), response.length(), 0) == response.length();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+namespace detail {
+  
+struct connection_impl
+{
+  void assign(const connection_impl &impl)
+  {
+    
+  }
+};
+
+}
+
+connection::connection(const detail::connection_impl &impl)
+  : _p(new detail::connection_impl())
+{
+  _p->assign(impl);
+}
+
+connection::~connection()
+{
+  
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1387,14 +1423,14 @@ size_t basic_tcp_client::id() const
 
 //---------------------------------------------------------------------------------------------------------------------
 tcp_client::tcp_client(const char *address, int port)
-  : base_type(address, port)
+  : base_t(address, port)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 tcp_client::tcp_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_type(server, params)
+  : base_t(server, params)
 {
 
 }
@@ -1524,7 +1560,7 @@ struct async_tcp_client_impl
 
 //---------------------------------------------------------------------------------------------------------------------
 async_tcp_client::async_tcp_client(const char *address, int port)
-  : base_type(address, port)
+  : base_t(address, port)
   , _ap(new detail::async_tcp_client_impl())
 {
   init_threads();
@@ -1532,7 +1568,7 @@ async_tcp_client::async_tcp_client(const char *address, int port)
 
 //---------------------------------------------------------------------------------------------------------------------
 async_tcp_client::async_tcp_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_type(server, params)
+  : base_t(server, params)
   , _ap(new detail::async_tcp_client_impl())
 {
   init_threads();
@@ -1726,14 +1762,14 @@ void async_tcp_client::kill_threads()
 
 //---------------------------------------------------------------------------------------------------------------------
 web_socket_client::web_socket_client(const char *address, int port)
-  : base_type(address, port)
+  : base_t(address, port)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 web_socket_client::web_socket_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_type(server, params)
+  : base_t(server, params)
 {
 
 }
@@ -1793,53 +1829,53 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
   uint8_t *cursor = ptr;
   HEADSOCKET_LOCK(_ap->readBlocks);
 
-  if (!_payloadSize)
+  if (!_payload_size)
   {
-    opcode prevOpcode = _currentHeader.op;
-    size_t headerSize = _currentHeader.read(cursor, length);
+    opcode prevOpcode = _current_header.op;
+    size_t headerSize = _current_header.read(cursor, length);
 
     if (!headerSize)
       return 0;
     else if (headerSize == invalid_operation)
       return invalid_operation;
 
-    _payloadSize = _currentHeader.payload_length;
+    _payload_size = _current_header.payload_length;
     cursor += headerSize;
     length -= headerSize;
 
-    if (_currentHeader.op != opcode::continuation)
-      _ap->readBlocks->block_begin(_currentHeader.op);
+    if (_current_header.op != opcode::continuation)
+      _ap->readBlocks->block_begin(_current_header.op);
     else
-      _currentHeader.op = prevOpcode;
+      _current_header.op = prevOpcode;
   }
 
-  if (_payloadSize)
+  if (_payload_size)
   {
-    size_t toConsume = length >= _payloadSize ? _payloadSize : length;
+    size_t toConsume = length >= _payload_size ? _payload_size : length;
 
     if (toConsume)
     {
       _ap->readBlocks->write(cursor, toConsume);
-      _payloadSize -= toConsume;
+      _payload_size -= toConsume;
       cursor += toConsume;
       length -= toConsume;
     }
   }
 
-  if (!_payloadSize)
+  if (!_payload_size)
   {
-    if (_currentHeader.masked)
+    if (_current_header.masked)
     {
       data_block &db = _ap->readBlocks->blocks.back();
-      size_t len = _currentHeader.payload_length;
-      detail::encoding::xor32(_currentHeader.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
+      size_t len = _current_header.payload_length;
+      detail::encoding::xor32(_current_header.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
     }
 
-    if (_currentHeader.fin)
+    if (_current_header.fin)
     {
       data_block &db = _ap->readBlocks->blocks.back();
 
-      switch (_currentHeader.op)
+      switch (_current_header.op)
       {
         case opcode::ping:
           push(_ap->readBlocks->buffer.data() + db.offset, db.length, opcode::pong);
@@ -1855,7 +1891,7 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
           break;
       }
 
-      if (_currentHeader.op == opcode::text || _currentHeader.op == opcode::binary)
+      if (_current_header.op == opcode::text || _current_header.op == opcode::binary)
       {
         _ap->readBlocks->block_end();
 
@@ -1875,7 +1911,7 @@ size_t web_socket_client::frame_header::read(const uint8_t *ptr, size_t length)
   const uint8_t *cursor = ptr;
   HAVE_ENOUGH_BYTES(2);
   this->fin = ((*cursor) & 0x80) != 0;
-  this->op = static_cast<headsocket::opcode>((*cursor++) & 0x0F);
+  this->op = static_cast<opcode>((*cursor++) & 0x0F);
 
   this->masked = ((*cursor) & 0x80) != 0;
   uint8_t byte = (*cursor++) & 0x7F;
