@@ -503,11 +503,11 @@ namespace headsocket {
 #if defined(HEADSOCKET_PLATFORM_WINDOWS)
 namespace detail {
 
-typedef SOCKET Socket;
-static const int SocketError = SOCKET_ERROR;
-static const SOCKET InvalidSocket = INVALID_SOCKET;
+typedef SOCKET socket_type;
+static const int socket_error = SOCKET_ERROR;
+static const SOCKET invalid_socket = INVALID_SOCKET;
 
-void CloseSocket(Socket s)
+void close_socket(socket_type s)
 {
   closesocket(s);
 }
@@ -517,11 +517,11 @@ void CloseSocket(Socket s)
 #elif defined(HEADSOCKET_PLATFORM_ANDROID) || defined(HEADSOCKET_PLATFORM_NIX)
 namespace detail {
 
-typedef int Socket;
-static const int SocketError = -1;
-static const int InvalidSocket = -1;
+typedef int socket_type;
+static const int socket_error = -1;
+static const int invalid_socket = -1;
 
-void CloseSocket(Socket s)
+void close_socket(socket_type s)
 {
   close(s);
 }
@@ -534,18 +534,18 @@ void CloseSocket(Socket s)
 
 namespace detail {
 
-class SHA1
+class sha1
 {
 public:
-  typedef uint32_t Digest32[5];
-  typedef uint8_t Digest8[20];
+  typedef uint32_t digest32_t[5];
+  typedef uint8_t digest8_t[20];
 
-  inline static uint32_t rotateLeft(uint32_t value, size_t count)
+  inline static uint32_t rotate_left(uint32_t value, size_t count)
   {
     return (value << count) ^ (value >> (32 - count));
   }
 
-  SHA1()
+  sha1()
   {
     _digest[0] = 0x67452301;
     _digest[1] = 0xEFCDAB89;
@@ -554,12 +554,12 @@ public:
     _digest[4] = 0xC3D2E1F0;
   }
 
-  ~SHA1()
+  ~sha1()
   {
 
   }
 
-  void processByte(uint8_t octet)
+  void process_byte(uint8_t octet)
   {
     _block[_blockByteIndex++] = octet;
     ++_byteCount;
@@ -567,56 +567,56 @@ public:
     if (_blockByteIndex == 64)
     {
       _blockByteIndex = 0;
-      processBlock();
+      process_block();
     }
   }
 
-  void processBlock(const void *start, const void *end)
+  void process_block(const void *start, const void *end)
   {
     const uint8_t *begin = static_cast<const uint8_t *>(start);
 
     while (begin != end)
-      processByte(*begin++);
+      process_byte(*begin++);
   }
 
-  void processBytes(const void *data, size_t len)
+  void process_bytes(const void *data, size_t len)
   {
-    processBlock(data, static_cast<const uint8_t *>(data) + len);
+    process_block(data, static_cast<const uint8_t *>(data) + len);
   }
 
-  const uint32_t *getDigest(Digest32 digest)
+  const uint32_t *get_digest(digest32_t digest)
   {
     size_t bitCount = _byteCount * 8;
-    processByte(0x80);
+    process_byte(0x80);
 
     if (_blockByteIndex > 56)
     {
       while (_blockByteIndex != 0)
-        processByte(0);
+        process_byte(0);
 
       while (_blockByteIndex < 56)
-        processByte(0);
+        process_byte(0);
     }
     else
       while (_blockByteIndex < 56)
-        processByte(0);
+        process_byte(0);
 
-    processByte(0);
-    processByte(0);
-    processByte(0);
-    processByte(0);
+    process_byte(0);
+    process_byte(0);
+    process_byte(0);
+    process_byte(0);
 
     for (int i = 24; i >= 0; i -= 8)
-      processByte(static_cast<unsigned char>((bitCount >> i) & 0xFF));
+      process_byte(static_cast<unsigned char>((bitCount >> i) & 0xFF));
 
     memcpy(digest, _digest, 5 * sizeof(uint32_t));
     return digest;
   }
 
-  const uint8_t *getDigestBytes(Digest8 digest)
+  const uint8_t *get_digest_bytes(digest8_t digest)
   {
-    Digest32 d32;
-    getDigest(d32);
+    digest32_t d32;
+    get_digest(d32);
     size_t s[] = { 24, 16, 8, 0 };
 
     for (size_t i = 0, j = 0; i < 20; ++i, j = i % 4)
@@ -626,7 +626,7 @@ public:
   }
 
 private:
-  void processBlock()
+  void process_block()
   {
     uint32_t w[80], s[] = { 24, 16, 8, 0 };
 
@@ -634,9 +634,9 @@ private:
       w[i / 4] = j ? (w[i / 4] | (_block[i] << s[j])) : (_block[i] << s[j]);
 
     for (size_t i = 16; i < 80; i++)
-      w[i] = rotateLeft((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]), 1);
+      w[i] = rotate_left((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]), 1);
 
-    Digest32 dig = { _digest[0], _digest[1], _digest[2], _digest[3], _digest[4] };
+    digest32_t dig = { _digest[0], _digest[1], _digest[2], _digest[3], _digest[4] };
 
     for (size_t f, k, i = 0; i < 80; ++i)
     {
@@ -649,10 +649,10 @@ private:
       else
         f = dig[1] ^ dig[2] ^ dig[3], k = 0xCA62C1D6;
 
-      uint32_t temp = rotateLeft(dig[0], 5) + f + dig[4] + k + w[i];
+      uint32_t temp = rotate_left(dig[0], 5) + f + dig[4] + k + w[i];
       dig[4] = dig[3];
       dig[3] = dig[2];
-      dig[2] = rotateLeft(dig[1], 30);
+      dig[2] = rotate_left(dig[1], 30);
       dig[1] = dig[0];
       dig[0] = temp;
     }
@@ -661,7 +661,7 @@ private:
       _digest[i] += dig[i];
   }
 
-  Digest32 _digest;
+  digest32_t _digest;
   uint8_t _block[64];
   size_t _blockByteIndex = 0;
   size_t _byteCount = 0;
@@ -669,7 +669,7 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct Encoding
+struct encoding
 {
   static size_t base64(const void *src, size_t srcLength, void *dst, size_t dstLength)
   {
@@ -716,7 +716,7 @@ struct Encoding
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct Endian
+struct endian
 {
   static uint16_t swap16bits(uint16_t x)
   {
@@ -739,49 +739,46 @@ struct Endian
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct CriticalSection
+struct critical_section
 {
-  mutable std::atomic_bool consumerLock;
+  mutable std::atomic_bool consumer_lock;
 
-  CriticalSection()
+  critical_section()
   {
-    consumerLock = false;
+    consumer_lock = false;
   }
+
   void lock() const
   {
-    while (consumerLock.exchange(true));
+    while (consumer_lock.exchange(true));
   }
+
   void unlock() const
   {
-    consumerLock = false;
+    consumer_lock = false;
   }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <typename T, typename M = CriticalSection>
-struct LockableValue : M
+template <typename T, typename M = critical_section>
+struct lockable_value : M
 {
   T value;
-  T *operator->()
-  {
-    return &value;
-  }
-  const T *operator->() const
-  {
-    return &value;
-  }
+
+  T *operator->() { return &value; }
+  const T *operator->() const { return &value; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct Semaphore
+struct semaphore
 {
   mutable std::atomic_size_t count;
   mutable std::mutex mutex;
   mutable std::condition_variable cv;
 
-  Semaphore()
+  semaphore()
   {
     count = 0;
   }
@@ -802,6 +799,7 @@ struct Semaphore
       std::lock_guard<std::mutex> lock(mutex);
       ++count;
     }
+
     cv.notify_one();
   }
   void consume() const
@@ -813,29 +811,29 @@ struct Semaphore
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct DataBlockBuffer
+struct data_block_buffer
 {
   std::vector<data_block> blocks;
   std::vector<uint8_t> buffer;
 
-  DataBlockBuffer()
+  data_block_buffer()
   {
     buffer.reserve(65536);
   }
 
-  data_block &blockBegin(opcode op)
+  data_block &block_begin(opcode op)
   {
     blocks.emplace_back(op, buffer.size());
     return blocks.back();
   }
 
-  data_block &blockEnd()
+  data_block &block_end()
   {
     blocks.back().is_completed = true;
     return blocks.back();
   }
 
-  void blockRemove()
+  void block_remove()
   {
     if (blocks.empty())
       return;
@@ -844,7 +842,7 @@ struct DataBlockBuffer
     blocks.pop_back();
   }
 
-  void writeData(const void *ptr, size_t length)
+  void write(const void *ptr, size_t length)
   {
     if (!length)
       return;
@@ -854,7 +852,7 @@ struct DataBlockBuffer
     blocks.back().length += length;
   }
 
-  size_t readData(void *ptr, size_t length)
+  size_t read(void *ptr, size_t length)
   {
     if (!ptr || blocks.empty() || !blocks.front().is_completed)
       return 0;
@@ -879,7 +877,7 @@ struct DataBlockBuffer
     return result;
   }
 
-  size_t peekData(opcode *op = nullptr) const
+  size_t peek(opcode *op = nullptr) const
   {
     if (blocks.empty() || !blocks.front().is_completed)
       return 0;
@@ -894,7 +892,7 @@ struct DataBlockBuffer
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef HEADSOCKET_PLATFORM_WINDOWS
-void setThreadName(const char *name)
+void set_thread_name(const char *name)
 {
 #pragma pack(push,8)
   typedef struct tagTHREADNAME_INFO
@@ -917,7 +915,7 @@ void setThreadName(const char *name)
   }
 }
 #else
-void setThreadName(const char *name)
+void set_thread_name(const char *name)
 {
 
 }
@@ -929,7 +927,7 @@ void setThreadName(const char *name)
 
 struct ConnectionParams
 {
-  detail::Socket clientSocket;
+  detail::socket_type clientSocket;
   sockaddr_in from;
   size_t id;
 };
@@ -937,7 +935,7 @@ struct ConnectionParams
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t socketReadLine(detail::Socket socket, void *ptr, size_t length)
+size_t socketReadLine(detail::socket_type socket, void *ptr, size_t length)
 {
   if (!ptr || !length)
     return 0;
@@ -949,7 +947,7 @@ size_t socketReadLine(detail::Socket socket, void *ptr, size_t length)
     char ch;
     int r = recv(socket, &ch, 1, 0);
 
-    if (!r || r == detail::SocketError)
+    if (!r || r == detail::socket_error)
       return 0;
 
     if (r != 1 || ch == '\n')
@@ -986,12 +984,12 @@ bool detail::websocket_handshake(ConnectionParams *params)
 
   key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-  detail::SHA1 sha;
-  detail::SHA1::Digest8 digest;
+  detail::sha1 sha;
+  detail::sha1::digest8_t digest;
 
-  sha.processBytes(key.c_str(), key.length());
-  sha.getDigestBytes(digest);
-  detail::Encoding::base64(digest, 20, lineBuffer, 256);
+  sha.process_bytes(key.c_str(), key.length());
+  sha.get_digest_bytes(digest);
+  detail::encoding::base64(digest, 20, lineBuffer, 256);
 
   std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
   response += lineBuffer;
@@ -1021,10 +1019,10 @@ struct basic_tcp_server_impl
   std::atomic_bool isRunning;
   std::atomic_bool disconnectThreadQuit;
   sockaddr_in local;
-  detail::LockableValue<std::vector<BaseTcpClientRef>> connections;
-  detail::Semaphore disconnectSemaphore;
+  detail::lockable_value<std::vector<BaseTcpClientRef>> connections;
+  detail::semaphore disconnectSemaphore;
   int port = 0;
-  detail::Socket serverSocket = InvalidSocket;
+  detail::socket_type serverSocket = invalid_socket;
   std::unique_ptr<std::thread> acceptThread;
   std::unique_ptr<std::thread> disconnectThread;
   size_t nextClientID = 1;
@@ -1082,7 +1080,7 @@ void basic_tcp_server::stop()
 {
   if (_p->isRunning.exchange(false))
   {
-    detail::CloseSocket(_p->serverSocket);
+    detail::close_socket(_p->serverSocket);
 
     {
       detail::enumerator<basic_tcp_client> e(this);
@@ -1198,7 +1196,7 @@ void basic_tcp_server::remove_disconnected() const
 //---------------------------------------------------------------------------------------------------------------------
 void basic_tcp_server::accept_thread()
 {
-  detail::setThreadName("BaseTcpServer::acceptThread");
+  detail::set_thread_name("BaseTcpServer::acceptThread");
 
   while (_p->isRunning)
   {
@@ -1212,7 +1210,7 @@ void basic_tcp_server::accept_thread()
     if (!_p->isRunning)
       break;
 
-    if (params.clientSocket != detail::InvalidSocket)
+    if (params.clientSocket != detail::invalid_socket)
     {
       basic_tcp_client *newClient = nullptr;
       bool failed = false;
@@ -1231,7 +1229,7 @@ void basic_tcp_server::accept_thread()
 
       if (failed)
       {
-        detail::CloseSocket(params.clientSocket);
+        detail::close_socket(params.clientSocket);
         --_p->nextClientID;
 
         if (!_p->nextClientID)
@@ -1246,7 +1244,7 @@ void basic_tcp_server::accept_thread()
 //---------------------------------------------------------------------------------------------------------------------
 void basic_tcp_server::disconnect_thread()
 {
-  detail::setThreadName("BaseTcpServer::disconnectThread");
+  detail::set_thread_name("BaseTcpServer::disconnectThread");
 
   while (!_p->disconnectThreadQuit)
   {
@@ -1271,7 +1269,7 @@ struct basic_tcp_client_impl
   sockaddr_in from;
   size_t id = 0;
   basic_tcp_server *server = nullptr;
-  Socket clientSocket = InvalidSocket;
+  socket_type clientSocket = invalid_socket;
   std::string address = "";
   int port = 0;
 
@@ -1307,13 +1305,13 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
   {
     _p->clientSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
 
-    if (_p->clientSocket == detail::InvalidSocket)
+    if (_p->clientSocket == detail::invalid_socket)
       return;
 
-    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == detail::SocketError)
+    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == detail::socket_error)
     {
-      detail::CloseSocket(_p->clientSocket);
-      _p->clientSocket = detail::InvalidSocket;
+      detail::close_socket(_p->clientSocket);
+      _p->clientSocket = detail::invalid_socket;
       continue;
     }
 
@@ -1322,7 +1320,7 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
 
   freeaddrinfo(result);
 
-  if (_p->clientSocket == detail::InvalidSocket)
+  if (_p->clientSocket == detail::invalid_socket)
     return;
 
   _p->address = address;
@@ -1354,10 +1352,10 @@ bool basic_tcp_client::disconnect()
 
   if (wasConnected)
   {
-    if (_p->clientSocket != detail::InvalidSocket)
+    if (_p->clientSocket != detail::invalid_socket)
     {
-      detail::CloseSocket(_p->clientSocket);
-      _p->clientSocket = detail::InvalidSocket;
+      detail::close_socket(_p->clientSocket);
+      _p->clientSocket = detail::invalid_socket;
     }
 
     if (_p->server)
@@ -1415,7 +1413,7 @@ size_t tcp_client::write(const void *ptr, size_t length)
 
   int result = send(_p->clientSocket, static_cast<const char *>(ptr), length, 0);
 
-  if (!result || result == detail::SocketError)
+  if (!result || result == detail::socket_error)
     return 0;
 
   return static_cast<size_t>(result);
@@ -1433,7 +1431,7 @@ bool tcp_client::force_write(const void *ptr, size_t length)
   {
     int result = send(_p->clientSocket, chPtr, length, 0);
 
-    if (!result || result == detail::SocketError)
+    if (!result || result == detail::socket_error)
       return false;
 
     length -= static_cast<size_t>(result);
@@ -1451,7 +1449,7 @@ size_t tcp_client::read(void *ptr, size_t length)
 
   int result = recv(_p->clientSocket, static_cast<char *>(ptr), length, 0);
 
-  if (!result || result == detail::SocketError)
+  if (!result || result == detail::socket_error)
     return 0;
 
   return static_cast<size_t>(result);
@@ -1470,7 +1468,7 @@ size_t tcp_client::read_line(void *ptr, size_t length)
     char ch;
     int r = recv(_p->clientSocket, &ch, 1, 0);
 
-    if (!r || r == detail::SocketError)
+    if (!r || r == detail::socket_error)
       return 0;
 
     if (r != 1 || ch == '\n')
@@ -1497,7 +1495,7 @@ bool tcp_client::force_read(void *ptr, size_t length)
   {
     int result = recv(_p->clientSocket, chPtr, length, 0);
 
-    if (!result || result == detail::SocketError)
+    if (!result || result == detail::socket_error)
       return false;
 
     length -= static_cast<size_t>(result);
@@ -1513,9 +1511,9 @@ namespace detail {
 
 struct async_tcp_client_impl
 {
-  detail::Semaphore writeSemaphore;
-  detail::LockableValue<detail::DataBlockBuffer> writeBlocks;
-  detail::LockableValue<detail::DataBlockBuffer> readBlocks;
+  detail::semaphore writeSemaphore;
+  detail::lockable_value<detail::data_block_buffer> writeBlocks;
+  detail::lockable_value<detail::data_block_buffer> readBlocks;
   std::unique_ptr<std::thread> writeThread;
   std::unique_ptr<std::thread> readThread;
 };
@@ -1558,9 +1556,9 @@ void async_tcp_client::push(const void *ptr, size_t length, opcode opcode)
 
   {
     HEADSOCKET_LOCK(_ap->writeBlocks);
-    _ap->writeBlocks->blockBegin(opcode);
-    _ap->writeBlocks->writeData(ptr, length);
-    _ap->writeBlocks->blockEnd();
+    _ap->writeBlocks->block_begin(opcode);
+    _ap->writeBlocks->write(ptr, length);
+    _ap->writeBlocks->block_end();
   }
 
   _ap->writeSemaphore.notify();
@@ -1582,7 +1580,7 @@ void async_tcp_client::push(const char *text)
 size_t async_tcp_client::peek() const
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
-  return _ap->readBlocks->peekData(nullptr);
+  return _ap->readBlocks->peek(nullptr);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1595,7 +1593,7 @@ size_t async_tcp_client::pop(void *ptr, size_t length)
     return 0;
 
   HEADSOCKET_LOCK(_ap->readBlocks);
-  return _ap->readBlocks->readData(ptr, length);
+  return _ap->readBlocks->read(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1608,7 +1606,7 @@ void async_tcp_client::init_threads()
 //---------------------------------------------------------------------------------------------------------------------
 void async_tcp_client::write_thread()
 {
-  detail::setThreadName("AsyncTcpClient::writeThread");
+  detail::set_thread_name("AsyncTcpClient::writeThread");
 
   std::vector<uint8_t> buffer(1024 * 1024);
 
@@ -1637,7 +1635,7 @@ void async_tcp_client::write_thread()
       {
         int result = send(_p->clientSocket, cursor, written, 0);
 
-        if (!result || result == detail::SocketError)
+        if (!result || result == detail::socket_error)
           break;
 
         cursor += result;
@@ -1668,7 +1666,7 @@ size_t async_tcp_client::async_read_handler(uint8_t *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 void async_tcp_client::read_thread()
 {
-  detail::setThreadName("AsyncTcpClient::readThread");
+  detail::set_thread_name("AsyncTcpClient::readThread");
 
   std::vector<uint8_t> buffer(1024 * 1024);
   size_t bufferBytes = 0, consumed = 0;
@@ -1683,7 +1681,7 @@ void async_tcp_client::read_thread()
       {
         result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
 
-        if (!result || result == detail::SocketError)
+        if (!result || result == detail::socket_error)
         {
           consumed = invalid_operation;
           break;
@@ -1750,7 +1748,7 @@ web_socket_client::~web_socket_client()
 size_t web_socket_client::peek(opcode *op) const
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
-  return _ap->readBlocks->peekData(op);
+  return _ap->readBlocks->peek(op);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1762,7 +1760,7 @@ size_t web_socket_client::async_write_handler(uint8_t *ptr, size_t length)
   while (length >= 16)
   {
     opcode op;
-    size_t toWrite = _ap->writeBlocks->peekData(&op);
+    size_t toWrite = _ap->writeBlocks->peek(&op);
     size_t toConsume = (length - 15) > frame_size_limit ? frame_size_limit : (length - 15);
     toConsume = toConsume > toWrite ? toWrite : toConsume;
 
@@ -1775,14 +1773,14 @@ size_t web_socket_client::async_write_handler(uint8_t *ptr, size_t length)
     size_t headerSize = header.write(cursor, length);
     cursor += headerSize;
     length -= headerSize;
-    _ap->writeBlocks->readData(cursor, toConsume);
+    _ap->writeBlocks->read(cursor, toConsume);
     cursor += toConsume;
     length -= toConsume;
 
     if (header.fin)
       _ap->writeSemaphore.consume();
 
-    if (!_ap->writeBlocks->peekData(&op))
+    if (!_ap->writeBlocks->peek(&op))
       break;
   }
 
@@ -1810,7 +1808,7 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
     length -= headerSize;
 
     if (_currentHeader.op != opcode::continuation)
-      _ap->readBlocks->blockBegin(_currentHeader.op);
+      _ap->readBlocks->block_begin(_currentHeader.op);
     else
       _currentHeader.op = prevOpcode;
   }
@@ -1821,7 +1819,7 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
 
     if (toConsume)
     {
-      _ap->readBlocks->writeData(cursor, toConsume);
+      _ap->readBlocks->write(cursor, toConsume);
       _payloadSize -= toConsume;
       cursor += toConsume;
       length -= toConsume;
@@ -1834,7 +1832,7 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
     {
       data_block &db = _ap->readBlocks->blocks.back();
       size_t len = _currentHeader.payload_length;
-      detail::Encoding::xor32(_currentHeader.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
+      detail::encoding::xor32(_currentHeader.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
     }
 
     if (_currentHeader.fin)
@@ -1859,10 +1857,10 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
 
       if (_currentHeader.op == opcode::text || _currentHeader.op == opcode::binary)
       {
-        _ap->readBlocks->blockEnd();
+        _ap->readBlocks->block_end();
 
         if (async_received_data(db, _ap->readBlocks->buffer.data() + db.offset, db.length))
-          _ap->readBlocks->blockRemove();
+          _ap->readBlocks->block_remove();
       }
     }
   }
@@ -1887,13 +1885,13 @@ size_t web_socket_client::frame_header::read(const uint8_t *ptr, size_t length)
   else if (byte == 126)
   {
     HAVE_ENOUGH_BYTES(2);
-    this->payload_length = detail::Endian::swap16bits(*(reinterpret_cast<const uint16_t *>(cursor)));
+    this->payload_length = detail::endian::swap16bits(*(reinterpret_cast<const uint16_t *>(cursor)));
     cursor += 2;
   }
   else if (byte == 127)
   {
     HAVE_ENOUGH_BYTES(8);
-    uint64_t length64 = detail::Endian::swap64bits(*(reinterpret_cast<const uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    uint64_t length64 = detail::endian::swap64bits(*(reinterpret_cast<const uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
     this->payload_length = static_cast<size_t>(length64);
     cursor += 8;
   }
@@ -1924,14 +1922,14 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
   {
     HAVE_ENOUGH_BYTES(2);
     *cursor++ |= 126;
-    *reinterpret_cast<uint16_t *>(cursor) = detail::Endian::swap16bits(static_cast<uint16_t>(this->payload_length));
+    *reinterpret_cast<uint16_t *>(cursor) = detail::endian::swap16bits(static_cast<uint16_t>(this->payload_length));
     cursor += 2;
   }
   else
   {
     HAVE_ENOUGH_BYTES(8);
     *cursor++ |= 127;
-    *reinterpret_cast<uint64_t *>(cursor) = detail::Endian::swap64bits(static_cast<uint64_t>(this->payload_length));
+    *reinterpret_cast<uint64_t *>(cursor) = detail::endian::swap64bits(static_cast<uint64_t>(this->payload_length));
     cursor += 8;
   }
 
