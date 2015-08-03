@@ -43,7 +43,7 @@ Usage:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scopeLock##suffix(var);
+#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scope_lock##suffix(var);
 #define HEADSOCKET_LOCK_SUFFIX2(var, suffix) HEADSOCKET_LOCK_SUFFIX(var, suffix)
 #define HEADSOCKET_LOCK(var) HEADSOCKET_LOCK_SUFFIX2(var, __LINE__)
 
@@ -53,82 +53,83 @@ namespace headsocket {
 
 /* Forward declarations */
 struct ConnectionParams;
-class BaseTcpServer;
-class BaseTcpClient;
-class TcpClient;
-class AsyncTcpClient;
+
+class basic_tcp_server;
+class basic_tcp_client;
+class tcp_client;
+class async_tcp_client;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
   
 /* Forward declarations */
-struct BaseTcpServerImpl;
-struct BaseTcpClientImpl;
-struct AsyncTcpClientImpl;
+struct basic_tcp_server_impl;
+struct basic_tcp_client_impl;
+struct async_tcp_client_impl;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-struct Holder
+struct holder
 {
   T *ptr;
 
-  Holder(T *p): ptr(p) { }
-  ~Holder() { if (ptr) delete ptr; }
+  holder(T *p): ptr(p) { }
+  ~holder() { if (ptr) delete ptr; }
   T *operator->() const { return ptr; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-class Enumerator
+class enumerator
 {
 public:
-  explicit Enumerator(const BaseTcpServer *server)
+  explicit enumerator(const basic_tcp_server *server)
     : _server(server)
   {
-    _count = _server->acquireClients();
+    _count = _server->acquire_clients();
   }
 
-  ~Enumerator()
+  ~enumerator()
   {
-    _server->releaseClients();
+    _server->release_clients();
   }
 
-  const BaseTcpServer *getServer() const
+  const basic_tcp_server *server() const
   {
     return _server;
   }
 
-  size_t getCount() const
+  size_t size() const
   {
     return _count;
   }
 
-  struct Iterator
+  struct iterator
   {
-    Enumerator *enumerator;
+    enumerator *e;
     size_t index;
 
-    Iterator(Enumerator *e, size_t i)
-      : enumerator(e)
-      , index(i)
+    iterator(enumerator *enu, size_t idx)
+      : e(enu)
+      , index(idx)
     {
 
     }
 
-    bool operator==(const Iterator &iter) const
+    bool operator==(const iterator &iter) const
     {
-      return iter.index == index && iter.enumerator == enumerator;
+      return iter.index == index && iter.e == e;
     }
 
-    bool operator!=(const Iterator &iter) const
+    bool operator!=(const iterator &iter) const
     {
-      return iter.index != index || iter.enumerator != enumerator;
+      return iter.index != index || iter.e != e;
     }
 
-    Iterator &operator++()
+    iterator &operator++()
     {
       ++index;
       return *this;
@@ -136,56 +137,56 @@ public:
 
     T *operator*() const
     {
-      return reinterpret_cast<T *>(enumerator->getServer()->getClient(index));
+      return reinterpret_cast<T *>(e->server()->client_at(index));
     }
   };
 
-  Iterator begin()
+  iterator begin()
   {
-    return Iterator(this, 0);
+    return iterator(this, 0);
   }
 
-  Iterator end()
+  iterator end()
   {
-    return Iterator(this, _count);
+    return iterator(this, _count);
   }
 
 private:
-  enum { T_IsBaseTcpClient = T::IsBaseTcpClient };
+  enum { needs_base_tcp_client = T::is_base_tcp_client };
 
-  const BaseTcpServer *_server;
+  const basic_tcp_server *_server;
   size_t _count;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static bool webSocketHandshake(ConnectionParams *params);
+static bool websocket_handshake(ConnectionParams *params);
 
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-enum class Opcode
+enum class opcode
 {
-  Continuation = 0x00,
-  Text = 0x01,
-  Binary = 0x02,
-  ConnectionClose = 0x08,
-  Ping = 0x09,
-  Pong = 0x0A
+  continuation = 0x00,
+  text = 0x01,
+  binary = 0x02,
+  connection_close = 0x08,
+  ping = 0x09,
+  pong = 0x0A
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct DataBlock
+struct data_block
 {
-  Opcode opcode;
+  opcode op;
   size_t offset;
   size_t length = 0;
-  bool isCompleted = false;
+  bool is_completed = false;
 
-  DataBlock(Opcode op, size_t off)
-    : opcode(op)
+  data_block(opcode opc, size_t off)
+    : op(opc)
     , offset(off)
   {
 
@@ -207,88 +208,89 @@ private:
 #define HEADSOCKET_SERVER_CTOR(className, baseClassName) \
   className(int port): baseClassName(port) { }
 
-class BaseTcpServer
+class basic_tcp_server
 {
 public:
-  virtual ~BaseTcpServer();
+  virtual ~basic_tcp_server();
 
   void stop();
-  bool isRunning() const;
-  bool disconnect(BaseTcpClient *client);
+  bool is_running() const;
+  bool disconnect(basic_tcp_client *client);
 
 protected:
-  explicit BaseTcpServer(int port);
+  explicit basic_tcp_server(int port);
 
-  virtual bool connectionHandshake(headsocket::ConnectionParams *params) = 0;
-  virtual BaseTcpClient *clientAccept(headsocket::ConnectionParams *params) = 0;
-  virtual void clientConnected(headsocket::BaseTcpClient *client) = 0;
-  virtual void clientDisconnected(headsocket::BaseTcpClient *client) = 0;
+  virtual bool handshake(ConnectionParams *params) = 0;
+  virtual basic_tcp_client *accept(ConnectionParams *params) = 0;
+  virtual void client_connected(basic_tcp_client *client) = 0;
+  virtual void client_disconnected(basic_tcp_client *client) = 0;
 
-  detail::Holder<detail::BaseTcpServerImpl> _p;
+  detail::holder<detail::basic_tcp_server_impl> _p;
 
 private:
-  template <typename T> friend class detail::Enumerator;
+  template <typename T> friend class detail::enumerator;
 
-  void removeAllDisconnected() const;
+  void remove_disconnected() const;
 
-  size_t acquireClients() const;
-  void releaseClients() const;
+  size_t acquire_clients() const;
+  void release_clients() const;
 
-  BaseTcpClient *getClient(size_t index) const;
-  size_t getNumClients() const;
+  basic_tcp_client *client_at(size_t index) const;
+  size_t num_clients() const;
 
-  void acceptThread();
-  void disconnectThread();
+  void accept_thread();
+  void disconnect_thread();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-class TcpServer : public BaseTcpServer
+class tcp_server : public basic_tcp_server
 {
 public:
-  typedef BaseTcpServer Base;
-  typedef T Client;
+  typedef basic_tcp_server base_type;
+  typedef T client_type;
 
-  explicit TcpServer(int port) : Base(port)
+  explicit tcp_server(int port)
+    : base_type(port)
   {
 
   }
 
-  virtual ~TcpServer()
+  virtual ~tcp_server()
   {
     stop();
   }
 
-  detail::Enumerator<T> enumerateClients() const
+  detail::enumerator<T> clients() const
   {
-    return detail::Enumerator<T>(this);
+    return detail::enumerator<T>(this);
   }
 
 protected:
-  bool connectionHandshake(ConnectionParams *params) override
+  bool handshake(ConnectionParams *params) override
   {
     return true;
   }
 
-  virtual void clientConnected(Client *client)
+  virtual void client_connected(client_type *client)
   {
 
   }
 
-  virtual void clientDisconnected(Client *client)
+  virtual void client_disconnected(client_type *client)
   {
 
   }
 
 private:
-  enum { T_IsBaseTcpClient = T::IsBaseTcpClient };
+  enum { needs_base_tcp_client = T::is_base_tcp_client };
 
-  BaseTcpClient *clientAccept(ConnectionParams *params) override
+  basic_tcp_client *accept(ConnectionParams *params) override
   {
     T *newClient = new T(this, params);
 
-    if (!newClient->isConnected())
+    if (!newClient->is_connected())
     {
       delete newClient;
       newClient = nullptr;
@@ -297,14 +299,14 @@ private:
     return newClient;
   }
 
-  void clientConnected(headsocket::BaseTcpClient *client) override
+  void client_connected(headsocket::basic_tcp_client *client) override
   {
-    clientConnected(reinterpret_cast<T *>(client));
+    client_connected(reinterpret_cast<T *>(client));
   }
 
-  void clientDisconnected(headsocket::BaseTcpClient *client) override
+  void client_disconnected(headsocket::basic_tcp_client *client) override
   {
-    clientDisconnected(reinterpret_cast<T *>(client));
+    client_disconnected(reinterpret_cast<T *>(client));
   }
 };
 
@@ -312,157 +314,157 @@ private:
 
 #define HEADSOCKET_CLIENT_CTOR(className, baseClassName) \
   className(const char *address, int port): baseClassName(address, port) { } \
-  className(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params): baseClassName(server, params) { }
+  className(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params): baseClassName(server, params) { }
 
-class BaseTcpClient
+class basic_tcp_client
 {
 public:
-  enum { IsBaseTcpClient };
+  enum { is_base_tcp_client };
 
-  static const size_t InvalidOperation = static_cast<size_t>(-1);
+  static const size_t invalid_operation = static_cast<size_t>(-1);
 
-  virtual ~BaseTcpClient();
+  virtual ~basic_tcp_client();
 
   bool disconnect();
-  bool isConnected() const;
+  bool is_connected() const;
 
-  BaseTcpServer *getServer() const;
-  size_t getID() const;
+  basic_tcp_server *server() const;
+  size_t id() const;
 
 protected:
-  friend class BaseTcpServer;
+  friend class basic_tcp_server;
 
-  BaseTcpClient(const char *address, int port);
-  BaseTcpClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
+  basic_tcp_client(const char *address, int port);
+  basic_tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
 
-  detail::Holder<detail::BaseTcpClientImpl> _p;
+  detail::holder<detail::basic_tcp_client_impl> _p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class TcpClient : public BaseTcpClient
+class tcp_client : public basic_tcp_client
 {
 public:
-  typedef BaseTcpClient Base;
-  enum { IsTcpClient };
+  typedef basic_tcp_client base_type;
+  enum { is_tcp_client };
 
-  TcpClient(const char *address, int port);
-  TcpClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
+  tcp_client(const char *address, int port);
+  tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
 
-  virtual ~TcpClient();
+  virtual ~tcp_client();
 
   virtual size_t write(const void *ptr, size_t length);
   virtual size_t read(void *ptr, size_t length);
 
-  bool forceWrite(const void *ptr, size_t length);
-  size_t readLine(void *ptr, size_t length);
-  bool forceRead(void *ptr, size_t length);
+  bool force_write(const void *ptr, size_t length);
+  size_t read_line(void *ptr, size_t length);
+  bool force_read(void *ptr, size_t length);
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class AsyncTcpClient : public BaseTcpClient
+class async_tcp_client : public basic_tcp_client
 {
 public:
-  typedef BaseTcpClient Base;
-  enum { IsAsyncTcpClient };
+  typedef basic_tcp_client base_type;
+  enum { is_async_tcp_client };
 
-  AsyncTcpClient(const char *address, int port);
-  AsyncTcpClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
+  async_tcp_client(const char *address, int port);
+  async_tcp_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
 
-  virtual ~AsyncTcpClient();
+  virtual ~async_tcp_client();
 
-  void pushData(const void *ptr, size_t length);
-  void pushData(const char *text);
-  size_t peekData() const;
-  size_t popData(void *ptr, size_t length);
+  void push(const void *ptr, size_t length);
+  void push(const char *text);
+  size_t peek() const;
+  size_t pop(void *ptr, size_t length);
 
 protected:
-  virtual void initAsyncThreads();
-  virtual size_t asyncWriteHandler(uint8_t *ptr, size_t length);
-  virtual size_t asyncReadHandler(uint8_t *ptr, size_t length);
+  virtual void init_threads();
+  virtual size_t async_write_handler(uint8_t *ptr, size_t length);
+  virtual size_t async_read_handler(uint8_t *ptr, size_t length);
 
-  virtual bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length)
+  virtual bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length)
   {
     return false;
   }
 
-  virtual void pushData(const void *ptr, size_t length, Opcode opcode);
+  virtual void push(const void *ptr, size_t length, opcode opcode);
 
-  void killThreads();
+  void kill_threads();
 
-  detail::Holder<detail::AsyncTcpClientImpl> _ap;
+  detail::holder<detail::async_tcp_client_impl> _ap;
 
 private:
-  void writeThread();
-  void readThread();
+  void write_thread();
+  void read_thread();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class WebSocketClient : public AsyncTcpClient
+class web_socket_client : public async_tcp_client
 {
 public:
-  static const size_t FrameSizeLimit = 128 * 1024;
+  static const size_t frame_size_limit = 128 * 1024;
 
-  typedef AsyncTcpClient Base;
-  enum { IsWebSocketClient };
+  typedef async_tcp_client base_type;
+  enum { is_web_socket_client };
 
-  WebSocketClient(const char *address, int port);
-  WebSocketClient(headsocket::BaseTcpServer *server, headsocket::ConnectionParams *params);
+  web_socket_client(const char *address, int port);
+  web_socket_client(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params);
 
-  virtual ~WebSocketClient();
+  virtual ~web_socket_client();
 
-  size_t peekData(Opcode *opcode) const;
+  size_t peek(opcode *op) const;
 
 protected:
-  size_t asyncWriteHandler(uint8_t *ptr, size_t length) override;
-  size_t asyncReadHandler(uint8_t *ptr, size_t length) override;
+  size_t async_write_handler(uint8_t *ptr, size_t length) override;
+  size_t async_read_handler(uint8_t *ptr, size_t length) override;
 
 private:
-  struct FrameHeader
+  struct frame_header
   {
     bool fin;
-    Opcode opcode;
+    opcode op;
     bool masked;
-    size_t payloadLength;
-    uint32_t maskingKey;
+    size_t payload_length;
+    uint32_t masking_key;
+
+    size_t write(uint8_t *ptr, size_t length) const;
+    size_t read(const uint8_t *ptr, size_t length);
   };
 
-  size_t parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
-  size_t writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header);
-
   size_t _payloadSize = 0;
-  FrameHeader _currentHeader;
+  frame_header _currentHeader;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-class WebSocketServer : public TcpServer<T>
+class web_socket_server : public tcp_server<T>
 {
 public:
-  typedef TcpServer<T> Base;
+  typedef tcp_server<T> base_type;
 
-  WebSocketServer(int port)
-    : Base(port)
+  web_socket_server(int port)
+    : base_type(port)
   {
 
   }
 
-  virtual ~WebSocketServer()
+  virtual ~web_socket_server()
   {
     stop();
   }
 
 protected:
-  bool connectionHandshake(ConnectionParams *params) override
+  bool handshake(ConnectionParams *params) override
   {
-    return detail::webSocketHandshake(params);
+    return detail::websocket_handshake(params);
   }
 
 private:
-  enum { T_IsWebSocketClient = T::IsWebSocketClient };
+  enum { needs_web_socket_client = T::is_web_socket_client };
 };
 
 }
@@ -813,7 +815,7 @@ struct Semaphore
 
 struct DataBlockBuffer
 {
-  std::vector<DataBlock> blocks;
+  std::vector<data_block> blocks;
   std::vector<uint8_t> buffer;
 
   DataBlockBuffer()
@@ -821,15 +823,15 @@ struct DataBlockBuffer
     buffer.reserve(65536);
   }
 
-  DataBlock &blockBegin(Opcode op)
+  data_block &blockBegin(opcode op)
   {
     blocks.emplace_back(op, buffer.size());
     return blocks.back();
   }
 
-  DataBlock &blockEnd()
+  data_block &blockEnd()
   {
-    blocks.back().isCompleted = true;
+    blocks.back().is_completed = true;
     return blocks.back();
   }
 
@@ -854,10 +856,10 @@ struct DataBlockBuffer
 
   size_t readData(void *ptr, size_t length)
   {
-    if (!ptr || blocks.empty() || !blocks.front().isCompleted)
+    if (!ptr || blocks.empty() || !blocks.front().is_completed)
       return 0;
 
-    DataBlock &db = blocks.front();
+    data_block &db = blocks.front();
     size_t result = db.length >= length ? length : db.length;
 
     if (result)
@@ -869,7 +871,7 @@ struct DataBlockBuffer
     if (!(db.length -= result))
       blocks.erase(blocks.begin());
     else
-      blocks.front().opcode = Opcode::Continuation;
+      blocks.front().op = opcode::continuation;
 
     if (result) for (auto &block : blocks) if (block.offset > db.offset)
           block.offset -= result;
@@ -877,13 +879,13 @@ struct DataBlockBuffer
     return result;
   }
 
-  size_t peekData(Opcode *op = nullptr) const
+  size_t peekData(opcode *op = nullptr) const
   {
-    if (blocks.empty() || !blocks.front().isCompleted)
+    if (blocks.empty() || !blocks.front().is_completed)
       return 0;
 
     if (op)
-      *op = blocks.front().opcode;
+      *op = blocks.front().op;
 
     return blocks.front().length;
   }
@@ -963,7 +965,7 @@ size_t socketReadLine(detail::Socket socket, void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool detail::webSocketHandshake(ConnectionParams *params)
+bool detail::websocket_handshake(ConnectionParams *params)
 {
   std::string key;
   char lineBuffer[256];
@@ -1005,16 +1007,16 @@ namespace detail {
 struct BaseTcpClientRef
 {
   size_t refCount = 0;
-  BaseTcpClient *client = nullptr;
+  basic_tcp_client *client = nullptr;
 
-  BaseTcpClientRef(BaseTcpClient *c)
+  BaseTcpClientRef(basic_tcp_client *c)
     : client(c)
   {
   
   }
 };
 
-struct BaseTcpServerImpl
+struct basic_tcp_server_impl
 {
   std::atomic_bool isRunning;
   std::atomic_bool disconnectThreadQuit;
@@ -1027,7 +1029,7 @@ struct BaseTcpServerImpl
   std::unique_ptr<std::thread> disconnectThread;
   size_t nextClientID = 1;
 
-  BaseTcpServerImpl()
+  basic_tcp_server_impl()
   {
     isRunning = false;
     disconnectThreadQuit = false;
@@ -1039,8 +1041,8 @@ struct BaseTcpServerImpl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpServer::BaseTcpServer(int port)
-  : _p(new detail::BaseTcpServerImpl())
+basic_tcp_server::basic_tcp_server(int port)
+  : _p(new detail::basic_tcp_server_impl())
 {
 #ifdef HEADSOCKET_PLATFORM_WINDOWS
   WSADATA wsaData;
@@ -1061,12 +1063,12 @@ BaseTcpServer::BaseTcpServer(int port)
 
   _p->isRunning = true;
   _p->port = port;
-  _p->acceptThread = std::make_unique<std::thread>(std::bind(&BaseTcpServer::acceptThread, this));
-  _p->disconnectThread = std::make_unique<std::thread>(std::bind(&BaseTcpServer::disconnectThread, this));
+  _p->acceptThread = std::make_unique<std::thread>(std::bind(&basic_tcp_server::accept_thread, this));
+  _p->disconnectThread = std::make_unique<std::thread>(std::bind(&basic_tcp_server::disconnect_thread, this));
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpServer::~BaseTcpServer()
+basic_tcp_server::~basic_tcp_server()
 {
   stop();
 
@@ -1076,14 +1078,14 @@ BaseTcpServer::~BaseTcpServer()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::stop()
+void basic_tcp_server::stop()
 {
   if (_p->isRunning.exchange(false))
   {
     detail::CloseSocket(_p->serverSocket);
 
     {
-      detail::Enumerator<BaseTcpClient> e(this);
+      detail::enumerator<basic_tcp_client> e(this);
 
       for (auto client : e)
         client->disconnect();
@@ -1106,13 +1108,13 @@ void BaseTcpServer::stop()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool BaseTcpServer::isRunning() const
+bool basic_tcp_server::is_running() const
 {
   return _p->isRunning;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool BaseTcpServer::disconnect(BaseTcpClient *client)
+bool basic_tcp_server::disconnect(basic_tcp_client *client)
 {
   bool found = false;
 
@@ -1130,7 +1132,7 @@ bool BaseTcpServer::disconnect(BaseTcpClient *client)
 
     if (found && !client->disconnect())
     {
-      clientDisconnected(client);
+      client_disconnected(client);
       _p->disconnectSemaphore.notify();
     }
   }
@@ -1139,21 +1141,21 @@ bool BaseTcpServer::disconnect(BaseTcpClient *client)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpClient *BaseTcpServer::getClient(size_t index) const
+basic_tcp_client *basic_tcp_server::client_at(size_t index) const
 {
   HEADSOCKET_LOCK(_p->connections);
   return index < _p->connections->size() ? _p->connections->at(index).client : nullptr;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t BaseTcpServer::getNumClients() const
+size_t basic_tcp_server::num_clients() const
 {
   HEADSOCKET_LOCK(_p->connections);
   return _p->connections->size();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t BaseTcpServer::acquireClients() const
+size_t basic_tcp_server::acquire_clients() const
 {
   HEADSOCKET_LOCK(_p->connections);
 
@@ -1164,18 +1166,18 @@ size_t BaseTcpServer::acquireClients() const
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::releaseClients() const
+void basic_tcp_server::release_clients() const
 {
   HEADSOCKET_LOCK(_p->connections);
 
   for (auto &clientRef : _p->connections.value)
     --clientRef.refCount;
 
-  removeAllDisconnected();
+  remove_disconnected();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::removeAllDisconnected() const
+void basic_tcp_server::remove_disconnected() const
 {
   size_t i = 0;
 
@@ -1183,7 +1185,7 @@ void BaseTcpServer::removeAllDisconnected() const
   {
     detail::BaseTcpClientRef clientRef = _p->connections.value[i];
 
-    if (!clientRef.client->isConnected() && clientRef.refCount == 0)
+    if (!clientRef.client->is_connected() && clientRef.refCount == 0)
     {
       _p->connections->erase(_p->connections->begin() + i);
       delete clientRef.client;
@@ -1194,14 +1196,14 @@ void BaseTcpServer::removeAllDisconnected() const
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::acceptThread()
+void basic_tcp_server::accept_thread()
 {
   detail::setThreadName("BaseTcpServer::acceptThread");
 
   while (_p->isRunning)
   {
     ConnectionParams params;
-    params.clientSocket = accept(_p->serverSocket, reinterpret_cast<struct sockaddr *>(&params.from), nullptr);
+    params.clientSocket = ::accept(_p->serverSocket, reinterpret_cast<struct sockaddr *>(&params.from), nullptr);
     params.id = _p->nextClientID++;
 
     if (!_p->nextClientID)
@@ -1212,14 +1214,14 @@ void BaseTcpServer::acceptThread()
 
     if (params.clientSocket != detail::InvalidSocket)
     {
-      BaseTcpClient *newClient = nullptr;
+      basic_tcp_client *newClient = nullptr;
       bool failed = false;
 
-      if (connectionHandshake(&params))
+      if (handshake(&params))
       {
         HEADSOCKET_LOCK(_p->connections);
 
-        if (newClient = clientAccept(&params))
+        if (newClient = accept(&params))
           _p->connections->push_back(newClient);
         else
           failed = true;
@@ -1236,13 +1238,13 @@ void BaseTcpServer::acceptThread()
           --_p->nextClientID;
       }
       else
-        clientConnected(newClient);
+        client_connected(newClient);
     }
   }
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void BaseTcpServer::disconnectThread()
+void basic_tcp_server::disconnect_thread()
 {
   detail::setThreadName("BaseTcpServer::disconnectThread");
 
@@ -1252,7 +1254,7 @@ void BaseTcpServer::disconnectThread()
       HEADSOCKET_LOCK(_p->disconnectSemaphore);
       HEADSOCKET_LOCK(_p->connections);
 
-      removeAllDisconnected();
+      remove_disconnected();
       _p->disconnectSemaphore.consume();
     }
   }
@@ -1262,18 +1264,18 @@ void BaseTcpServer::disconnectThread()
 
 namespace detail {
 
-struct BaseTcpClientImpl
+struct basic_tcp_client_impl
 {
   std::atomic_int refCount;
   std::atomic_bool isConnected;
   sockaddr_in from;
   size_t id = 0;
-  BaseTcpServer *server = nullptr;
+  basic_tcp_server *server = nullptr;
   Socket clientSocket = InvalidSocket;
   std::string address = "";
   int port = 0;
 
-  BaseTcpClientImpl()
+  basic_tcp_client_impl()
   {
     refCount = 0;
     isConnected = false;
@@ -1285,8 +1287,8 @@ struct BaseTcpClientImpl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpClient::BaseTcpClient(const char *address, int port)
-  : _p(new detail::BaseTcpClientImpl())
+basic_tcp_client::basic_tcp_client(const char *address, int port)
+  : _p(new detail::basic_tcp_client_impl())
 {
   struct addrinfo *result = nullptr, *ptr = nullptr, hints;
 
@@ -1329,8 +1331,8 @@ BaseTcpClient::BaseTcpClient(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpClient::BaseTcpClient(BaseTcpServer *server, ConnectionParams *params)
-  : _p(new detail::BaseTcpClientImpl())
+basic_tcp_client::basic_tcp_client(basic_tcp_server *server, ConnectionParams *params)
+  : _p(new detail::basic_tcp_client_impl())
 {
   _p->server = server;
   _p->clientSocket = params->clientSocket;
@@ -1340,13 +1342,13 @@ BaseTcpClient::BaseTcpClient(BaseTcpServer *server, ConnectionParams *params)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpClient::~BaseTcpClient()
+basic_tcp_client::~basic_tcp_client()
 {
   disconnect();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool BaseTcpClient::disconnect()
+bool basic_tcp_client::disconnect()
 {
   bool wasConnected = _p->isConnected.exchange(false);
 
@@ -1366,19 +1368,19 @@ bool BaseTcpClient::disconnect()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool BaseTcpClient::isConnected() const
+bool basic_tcp_client::is_connected() const
 {
   return _p->isConnected;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-BaseTcpServer *BaseTcpClient::getServer() const
+basic_tcp_server *basic_tcp_client::server() const
 {
   return _p->server;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t BaseTcpClient::getID() const
+size_t basic_tcp_client::id() const
 {
   return _p->id;
 }
@@ -1386,27 +1388,27 @@ size_t BaseTcpClient::getID() const
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::TcpClient(const char *address, int port)
-  : Base(address, port)
+tcp_client::tcp_client(const char *address, int port)
+  : base_type(address, port)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::TcpClient(BaseTcpServer *server, ConnectionParams *params)
-  : Base(server, params)
+tcp_client::tcp_client(basic_tcp_server *server, ConnectionParams *params)
+  : base_type(server, params)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-TcpClient::~TcpClient()
+tcp_client::~tcp_client()
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::write(const void *ptr, size_t length)
+size_t tcp_client::write(const void *ptr, size_t length)
 {
   if (!ptr || !length)
     return 0;
@@ -1420,7 +1422,7 @@ size_t TcpClient::write(const void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool TcpClient::forceWrite(const void *ptr, size_t length)
+bool tcp_client::force_write(const void *ptr, size_t length)
 {
   if (!ptr)
     return true;
@@ -1442,7 +1444,7 @@ bool TcpClient::forceWrite(const void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::read(void *ptr, size_t length)
+size_t tcp_client::read(void *ptr, size_t length)
 {
   if (!ptr || !length)
     return 0;
@@ -1456,7 +1458,7 @@ size_t TcpClient::read(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t TcpClient::readLine(void *ptr, size_t length)
+size_t tcp_client::read_line(void *ptr, size_t length)
 {
   if (!ptr || !length)
     return 0;
@@ -1484,7 +1486,7 @@ size_t TcpClient::readLine(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool TcpClient::forceRead(void *ptr, size_t length)
+bool tcp_client::force_read(void *ptr, size_t length)
 {
   if (!ptr)
     return true;
@@ -1509,7 +1511,7 @@ bool TcpClient::forceRead(void *ptr, size_t length)
 
 namespace detail {
 
-struct AsyncTcpClientImpl
+struct async_tcp_client_impl
 {
   detail::Semaphore writeSemaphore;
   detail::LockableValue<detail::DataBlockBuffer> writeBlocks;
@@ -1523,23 +1525,23 @@ struct AsyncTcpClientImpl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-AsyncTcpClient::AsyncTcpClient(const char *address, int port)
-  : Base(address, port)
-  , _ap(new detail::AsyncTcpClientImpl())
+async_tcp_client::async_tcp_client(const char *address, int port)
+  : base_type(address, port)
+  , _ap(new detail::async_tcp_client_impl())
 {
-  initAsyncThreads();
+  init_threads();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-AsyncTcpClient::AsyncTcpClient(BaseTcpServer *server, ConnectionParams *params)
-  : Base(server, params)
-  , _ap(new detail::AsyncTcpClientImpl())
+async_tcp_client::async_tcp_client(basic_tcp_server *server, ConnectionParams *params)
+  : base_type(server, params)
+  , _ap(new detail::async_tcp_client_impl())
 {
-  initAsyncThreads();
+  init_threads();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-AsyncTcpClient::~AsyncTcpClient()
+async_tcp_client::~async_tcp_client()
 {
   disconnect();
 
@@ -1549,7 +1551,7 @@ AsyncTcpClient::~AsyncTcpClient()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode opcode)
+void async_tcp_client::push(const void *ptr, size_t length, opcode opcode)
 {
   if (!ptr)
     return;
@@ -1565,29 +1567,29 @@ void AsyncTcpClient::pushData(const void *ptr, size_t length, Opcode opcode)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::pushData(const void *ptr, size_t length)
+void async_tcp_client::push(const void *ptr, size_t length)
 {
-  pushData(ptr, length, Opcode::Binary);
+  push(ptr, length, opcode::binary);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::pushData(const char *text)
+void async_tcp_client::push(const char *text)
 {
-  pushData(text, text ? strlen(text) : 0, Opcode::Text);
+  push(text, text ? strlen(text) : 0, opcode::text);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t AsyncTcpClient::peekData() const
+size_t async_tcp_client::peek() const
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
   return _ap->readBlocks->peekData(nullptr);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t AsyncTcpClient::popData(void *ptr, size_t length)
+size_t async_tcp_client::pop(void *ptr, size_t length)
 {
   if (!ptr)
-    return InvalidOperation;
+    return invalid_operation;
 
   if (!length)
     return 0;
@@ -1597,14 +1599,14 @@ size_t AsyncTcpClient::popData(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::initAsyncThreads()
+void async_tcp_client::init_threads()
 {
-  _ap->writeThread = std::make_unique<std::thread>(std::bind(&AsyncTcpClient::writeThread, this));
-  _ap->readThread = std::make_unique<std::thread>(std::bind(&AsyncTcpClient::readThread, this));
+  _ap->writeThread = std::make_unique<std::thread>(std::bind(&async_tcp_client::write_thread, this));
+  _ap->readThread = std::make_unique<std::thread>(std::bind(&async_tcp_client::read_thread, this));
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::writeThread()
+void async_tcp_client::write_thread()
 {
   detail::setThreadName("AsyncTcpClient::writeThread");
 
@@ -1619,10 +1621,10 @@ void AsyncTcpClient::writeThread()
       if (!_p->isConnected)
         break;
 
-      written = asyncWriteHandler(buffer.data(), buffer.size());
+      written = async_write_handler(buffer.data(), buffer.size());
     }
 
-    if (written == InvalidOperation)
+    if (written == invalid_operation)
       break;
 
     if (!written)
@@ -1644,11 +1646,11 @@ void AsyncTcpClient::writeThread()
     }
   }
 
-  killThreads();
+  kill_threads();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t AsyncTcpClient::asyncWriteHandler(uint8_t *ptr, size_t length)
+size_t async_tcp_client::async_write_handler(uint8_t *ptr, size_t length)
 {
   HEADSOCKET_LOCK(_ap->writeBlocks);
   // TODO
@@ -1656,7 +1658,7 @@ size_t AsyncTcpClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t AsyncTcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
+size_t async_tcp_client::async_read_handler(uint8_t *ptr, size_t length)
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
   // TODO
@@ -1664,7 +1666,7 @@ size_t AsyncTcpClient::asyncReadHandler(uint8_t *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::readThread()
+void async_tcp_client::read_thread()
 {
   detail::setThreadName("AsyncTcpClient::readThread");
 
@@ -1683,14 +1685,14 @@ void AsyncTcpClient::readThread()
 
         if (!result || result == detail::SocketError)
         {
-          consumed = InvalidOperation;
+          consumed = invalid_operation;
           break;
         }
 
         bufferBytes += static_cast<size_t>(result);
       }
 
-      consumed = asyncReadHandler(buffer.data(), bufferBytes);
+      consumed = async_read_handler(buffer.data(), bufferBytes);
 
       if (!consumed)
       {
@@ -1701,7 +1703,7 @@ void AsyncTcpClient::readThread()
         break;
     }
 
-    if (consumed == InvalidOperation)
+    if (consumed == invalid_operation)
       break;
 
     bufferBytes -= consumed;
@@ -1710,11 +1712,11 @@ void AsyncTcpClient::readThread()
       memcpy(buffer.data(), buffer.data() + consumed, bufferBytes);
   }
 
-  killThreads();
+  kill_threads();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void AsyncTcpClient::killThreads()
+void async_tcp_client::kill_threads()
 {
   if (std::this_thread::get_id() == _ap->readThread->get_id())
     _ap->writeSemaphore.notify();
@@ -1725,52 +1727,52 @@ void AsyncTcpClient::killThreads()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::WebSocketClient(const char *address, int port)
-  : Base(address, port)
+web_socket_client::web_socket_client(const char *address, int port)
+  : base_type(address, port)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::WebSocketClient(BaseTcpServer *server, ConnectionParams *params)
-  : Base(server, params)
+web_socket_client::web_socket_client(basic_tcp_server *server, ConnectionParams *params)
+  : base_type(server, params)
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-WebSocketClient::~WebSocketClient()
+web_socket_client::~web_socket_client()
 {
 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t WebSocketClient::peekData(Opcode *opcode) const
+size_t web_socket_client::peek(opcode *op) const
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
-  return _ap->readBlocks->peekData(opcode);
+  return _ap->readBlocks->peekData(op);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
+size_t web_socket_client::async_write_handler(uint8_t *ptr, size_t length)
 {
   uint8_t *cursor = ptr;
   HEADSOCKET_LOCK(_ap->writeBlocks);
 
   while (length >= 16)
   {
-    Opcode op;
+    opcode op;
     size_t toWrite = _ap->writeBlocks->peekData(&op);
-    size_t toConsume = (length - 15) > FrameSizeLimit ? FrameSizeLimit : (length - 15);
+    size_t toConsume = (length - 15) > frame_size_limit ? frame_size_limit : (length - 15);
     toConsume = toConsume > toWrite ? toWrite : toConsume;
 
-    FrameHeader header;
+    frame_header header;
     header.fin = (toWrite - toConsume) == 0;
-    header.opcode = op;
+    header.op = op;
     header.masked = false;
-    header.payloadLength = toConsume;
+    header.payload_length = toConsume;
 
-    size_t headerSize = writeFrameHeader(cursor, length, header);
+    size_t headerSize = header.write(cursor, length);
     cursor += headerSize;
     length -= headerSize;
     _ap->writeBlocks->readData(cursor, toConsume);
@@ -1788,29 +1790,29 @@ size_t WebSocketClient::asyncWriteHandler(uint8_t *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
+size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
 {
   uint8_t *cursor = ptr;
   HEADSOCKET_LOCK(_ap->readBlocks);
 
   if (!_payloadSize)
   {
-    Opcode prevOpcode = _currentHeader.opcode;
-    size_t headerSize = parseFrameHeader(cursor, length, _currentHeader);
+    opcode prevOpcode = _currentHeader.op;
+    size_t headerSize = _currentHeader.read(cursor, length);
 
     if (!headerSize)
       return 0;
-    else if (headerSize == InvalidOperation)
-      return InvalidOperation;
+    else if (headerSize == invalid_operation)
+      return invalid_operation;
 
-    _payloadSize = _currentHeader.payloadLength;
+    _payloadSize = _currentHeader.payload_length;
     cursor += headerSize;
     length -= headerSize;
 
-    if (_currentHeader.opcode != Opcode::Continuation)
-      _ap->readBlocks->blockBegin(_currentHeader.opcode);
+    if (_currentHeader.op != opcode::continuation)
+      _ap->readBlocks->blockBegin(_currentHeader.op);
     else
-      _currentHeader.opcode = prevOpcode;
+      _currentHeader.op = prevOpcode;
   }
 
   if (_payloadSize)
@@ -1830,36 +1832,36 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
   {
     if (_currentHeader.masked)
     {
-      DataBlock &db = _ap->readBlocks->blocks.back();
-      size_t len = _currentHeader.payloadLength;
-      detail::Encoding::xor32(_currentHeader.maskingKey, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
+      data_block &db = _ap->readBlocks->blocks.back();
+      size_t len = _currentHeader.payload_length;
+      detail::Encoding::xor32(_currentHeader.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
     }
 
     if (_currentHeader.fin)
     {
-      DataBlock &db = _ap->readBlocks->blocks.back();
+      data_block &db = _ap->readBlocks->blocks.back();
 
-      switch (_currentHeader.opcode)
+      switch (_currentHeader.op)
       {
-        case Opcode::Ping:
-          pushData(_ap->readBlocks->buffer.data() + db.offset, db.length, Opcode::Pong);
+        case opcode::ping:
+          push(_ap->readBlocks->buffer.data() + db.offset, db.length, opcode::pong);
           break;
 
-        case Opcode::Text:
+        case opcode::text:
           _ap->readBlocks->buffer.push_back(0);
           ++db.length;
           break;
 
-        case Opcode::ConnectionClose:
-          killThreads();
+        case opcode::connection_close:
+          kill_threads();
           break;
       }
 
-      if (_currentHeader.opcode == Opcode::Text || _currentHeader.opcode == Opcode::Binary)
+      if (_currentHeader.op == opcode::text || _currentHeader.op == opcode::binary)
       {
         _ap->readBlocks->blockEnd();
 
-        if (asyncReceivedData(db, _ap->readBlocks->buffer.data() + db.offset, db.length))
+        if (async_received_data(db, _ap->readBlocks->buffer.data() + db.offset, db.length))
           _ap->readBlocks->blockRemove();
       }
     }
@@ -1870,36 +1872,36 @@ size_t WebSocketClient::asyncReadHandler(uint8_t *ptr, size_t length)
 
 //---------------------------------------------------------------------------------------------------------------------
 #define HAVE_ENOUGH_BYTES(num) if (length < num) return 0; else length -= num;
-size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header)
+size_t web_socket_client::frame_header::read(const uint8_t *ptr, size_t length)
 {
-  uint8_t *cursor = ptr;
+  const uint8_t *cursor = ptr;
   HAVE_ENOUGH_BYTES(2);
-  header.fin = ((*cursor) & 0x80) != 0;
-  header.opcode = static_cast<Opcode>((*cursor++) & 0x0F);
+  this->fin = ((*cursor) & 0x80) != 0;
+  this->op = static_cast<headsocket::opcode>((*cursor++) & 0x0F);
 
-  header.masked = ((*cursor) & 0x80) != 0;
+  this->masked = ((*cursor) & 0x80) != 0;
   uint8_t byte = (*cursor++) & 0x7F;
 
   if (byte < 126)
-    header.payloadLength = byte;
+    this->payload_length = byte;
   else if (byte == 126)
   {
     HAVE_ENOUGH_BYTES(2);
-    header.payloadLength = detail::Endian::swap16bits(*(reinterpret_cast<uint16_t *>(cursor)));
+    this->payload_length = detail::Endian::swap16bits(*(reinterpret_cast<const uint16_t *>(cursor)));
     cursor += 2;
   }
   else if (byte == 127)
   {
     HAVE_ENOUGH_BYTES(8);
-    uint64_t length64 = detail::Endian::swap64bits(*(reinterpret_cast<uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
-    header.payloadLength = static_cast<size_t>(length64);
+    uint64_t length64 = detail::Endian::swap64bits(*(reinterpret_cast<const uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    this->payload_length = static_cast<size_t>(length64);
     cursor += 8;
   }
 
-  if (header.masked)
+  if (this->masked)
   {
     HAVE_ENOUGH_BYTES(4);
-    header.maskingKey = *(reinterpret_cast<uint32_t *>(cursor));
+    this->masking_key = *(reinterpret_cast<const uint32_t *>(cursor));
     cursor += 4;
   }
 
@@ -1907,36 +1909,36 @@ size_t WebSocketClient::parseFrameHeader(uint8_t *ptr, size_t length, FrameHeade
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t WebSocketClient::writeFrameHeader(uint8_t *ptr, size_t length, FrameHeader &header)
+size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
 {
   uint8_t *cursor = ptr;
   HAVE_ENOUGH_BYTES(2);
-  *cursor = header.fin ? 0x80 : 0x00;
-  *cursor++ |= static_cast<uint8_t>(header.opcode);
+  *cursor = this->fin ? 0x80 : 0x00;
+  *cursor++ |= static_cast<uint8_t>(this->op);
 
-  *cursor = header.masked ? 0x80 : 0x00;
+  *cursor = this->masked ? 0x80 : 0x00;
 
-  if (header.payloadLength < 126)
-    *cursor++ |= static_cast<uint8_t>(header.payloadLength);
-  else if (header.payloadLength < 65536)
+  if (this->payload_length < 126)
+    *cursor++ |= static_cast<uint8_t>(this->payload_length);
+  else if (this->payload_length < 65536)
   {
     HAVE_ENOUGH_BYTES(2);
     *cursor++ |= 126;
-    *reinterpret_cast<uint16_t *>(cursor) = detail::Endian::swap16bits(static_cast<uint16_t>(header.payloadLength));
+    *reinterpret_cast<uint16_t *>(cursor) = detail::Endian::swap16bits(static_cast<uint16_t>(this->payload_length));
     cursor += 2;
   }
   else
   {
     HAVE_ENOUGH_BYTES(8);
     *cursor++ |= 127;
-    *reinterpret_cast<uint64_t *>(cursor) = detail::Endian::swap64bits(static_cast<uint64_t>(header.payloadLength));
+    *reinterpret_cast<uint64_t *>(cursor) = detail::Endian::swap64bits(static_cast<uint64_t>(this->payload_length));
     cursor += 8;
   }
 
-  if (header.masked)
+  if (this->masked)
   {
     HAVE_ENOUGH_BYTES(4);
-    *reinterpret_cast<uint32_t *>(cursor) = header.maskingKey;
+    *reinterpret_cast<uint32_t *>(cursor) = this->masking_key;
     cursor += 4;
   }
 

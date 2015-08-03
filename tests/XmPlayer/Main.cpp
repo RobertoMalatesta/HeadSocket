@@ -8,22 +8,22 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Client : public headsocket::WebSocketClient
+class Client : public headsocket::web_socket_client
 {
 public:
-  HEADSOCKET_CLIENT_CTOR(Client, headsocket::WebSocketClient);
+  HEADSOCKET_CLIENT_CTOR(Client, headsocket::web_socket_client);
 
   virtual ~Client()
   {
     if (_xmContext)
       xm_free_context(_xmContext);
 
-    std::cout << "Client " << getID() << " disconnected!" << std::endl;
+    std::cout << "Client " << id() << " disconnected!" << std::endl;
   }
 
-  bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) override
+  bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length) override
   {
-    if (db.opcode != headsocket::Opcode::Text) return true;
+    if (db.op != headsocket::opcode::text) return true;
 
     std::stringstream ss;
     ss << reinterpret_cast<const char *>(ptr);
@@ -55,7 +55,7 @@ public:
 
       xm_set_max_loop_count(_xmContext, 0);
 
-      std::cout << "Client " << getID() << " connected!" << std::endl;
+      std::cout << "Client " << id() << " connected!" << std::endl;
     }
     else if (value > 0)
     {
@@ -70,7 +70,7 @@ public:
         _smallSampleBuffer[j + 1] = static_cast<int8_t>((_sampleBuffer[i + 1] + _sampleBuffer[i + 3]) * 0.5f * 127.0f);
       }
 
-      pushData(_smallSampleBuffer.data(), sizeof(int8_t) * _smallSampleBuffer.size());
+      push(_smallSampleBuffer.data(), sizeof(int8_t) * _smallSampleBuffer.size());
     }
 
     return true;
@@ -86,9 +86,9 @@ private:
 int main(int argc, char *argv[])
 {
   int port = 42667;
-  headsocket::WebSocketServer<Client> server(port);
-  
-  if (server.isRunning())
+  headsocket::web_socket_server<Client> server(port);
+
+  if (server.is_running())
     std::cout << "XM module server is running at port " << port << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;

@@ -8,21 +8,21 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Client : public headsocket::WebSocketClient
+class Client : public headsocket::web_socket_client
 {
 public:
-  HEADSOCKET_CLIENT_CTOR(Client, headsocket::WebSocketClient);
+  HEADSOCKET_CLIENT_CTOR(Client, headsocket::web_socket_client);
 
-  bool asyncReceivedData(const headsocket::DataBlock &db, uint8_t *ptr, size_t length) override
+  bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length) override
   {
     // Ignore nontextual opcodes
-    if (db.opcode != headsocket::Opcode::Text) return true;
+    if (db.op != headsocket::opcode::text) return true;
 
     std::string cmd = reinterpret_cast<const char *>(ptr);
 
     // Print command:
     {
-      std::cout << "Client " << getID() << " received: " << cmd << std::endl;
+      std::cout << "Client " << id() << " received: " << cmd << std::endl;
     }
 
     // Parse command & parameter
@@ -71,7 +71,7 @@ public:
       json << "  \"dir\": \"" << escape(_directoryStack.back()) << "\",";
       json << "  \"count\": " << count << "\n}";
 
-      pushData(json.str().c_str());
+      push(json.str().c_str());
     }
     else if (cmd == "cd" && !param.empty())
     {
@@ -97,19 +97,19 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Server : public headsocket::WebSocketServer<Client>
+class Server : public headsocket::web_socket_server<Client>
 {
 public:
-  HEADSOCKET_SERVER_CTOR(Server, headsocket::WebSocketServer<Client>);
+  HEADSOCKET_SERVER_CTOR(Server, headsocket::web_socket_server<Client>);
 
-  void clientConnected(Client *client) override
+  void client_connected(client_type *client) override
   {
-    std::cout << "Client " << client->getID() << " connected!" << std::endl;
+    std::cout << "Client " << client->id() << " connected!" << std::endl;
   }
 
-  void clientDisconnected(Client *client) override
+  void client_disconnected(client_type *client) override
   {
-    std::cout << "Client " << client->getID() << " disconnected!" << std::endl;
+    std::cout << "Client " << client->id() << " disconnected!" << std::endl;
   }
 };
 
@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
   int port = 42666;
   Server server(port);
 
-  if (server.isRunning())
+  if (server.is_running())
     std::cout << "Directory listing server is running at port " << port << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;
