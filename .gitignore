@@ -186,3 +186,5 @@ FakesAssemblies/
 /.build/
 /bin/
 
+# Premake
+premake5.exe
