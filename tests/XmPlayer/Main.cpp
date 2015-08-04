@@ -86,9 +86,11 @@ private:
 int main(int argc, char *argv[])
 {
   int port = 42667;
-  headsocket::web_socket_server<Client> server(port);
 
-  if (server.is_running())
+  typedef headsocket::web_socket_server<Client> server_t;
+  auto server = server_t::create(port);
+
+  if (server->is_running())
     std::cout << "XM module server is running at port " << port << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;

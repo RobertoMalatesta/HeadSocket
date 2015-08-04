@@ -49,13 +49,13 @@ protected:
     return false;
   }
 
-  tcp_client *accept(connection &conn) final override
+  ptr<basic_tcp_client> accept(connection &conn) final override
   {
     return nullptr;
   }
 
-  void client_connected(basic_tcp_client *client) final override { }
-  void client_disconnected(basic_tcp_client *client) final override { }
+  void client_connected(client_ptr client) final override { }
+  void client_disconnected(client_ptr client) final override { }
 
 private:
 

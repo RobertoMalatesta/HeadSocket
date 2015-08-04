@@ -102,12 +102,12 @@ class Server : public headsocket::web_socket_server<Client>
 public:
   HEADSOCKET_SERVER_CTOR(Server, headsocket::web_socket_server<Client>);
 
-  void client_connected(client_t *client) override
+  void client_connected(client_ptr client) override
   {
     std::cout << "Client " << client->id() << " connected!" << std::endl;
   }
 
-  void client_disconnected(client_t *client) override
+  void client_disconnected(client_ptr client) override
   {
     std::cout << "Client " << client->id() << " disconnected!" << std::endl;
   }

@@ -17,7 +17,7 @@ Usage:
 #ifndef __HEADSOCKET_H__
 #define __HEADSOCKET_H__
 
-#include <stdint.h>
+#include <memory>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -29,6 +29,14 @@ class basic_tcp_server;
 class basic_tcp_client;
 class tcp_client;
 class async_tcp_client;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename T> using ptr = std::shared_ptr<T>;
+template <typename T> using weak_ptr = std::weak_ptr<T>;
+template <typename T> using unique_ptr = std::unique_ptr<T>;
+
+typedef size_t id_t;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -47,33 +55,21 @@ static const size_t line_buffer_size = 1024;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-struct holder
-{
-  T *ptr;
-
-  holder(T *p): ptr(p) { }
-  ~holder() { if (ptr) delete ptr; }
-  T *operator->() const { return ptr; }
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-template <typename T>
 class enumerator
 {
 public:
-  explicit enumerator(const basic_tcp_server *server)
+  explicit enumerator(const basic_tcp_server &server)
     : _server(server)
   {
-    _count = _server->acquire_clients();
+    _count = _server.acquire_clients();
   }
 
   ~enumerator()
   {
-    _server->release_clients();
+    _server.release_clients();
   }
 
-  const basic_tcp_server *server() const
+  const basic_tcp_server &server() const
   {
     return _server;
   }
@@ -111,9 +107,9 @@ public:
       return *this;
     }
 
-    T *operator*() const
+    ptr<T> operator*() const
     {
-      return reinterpret_cast<T *>(e->server()->client_at(index));
+      return std::dynamic_pointer_cast<T>(e->server().client_at(index));
     }
   };
 
@@ -130,7 +126,7 @@ public:
 private:
   enum { needs_basic_tcp_client = T::is_basic_tcp_client };
 
-  const basic_tcp_server *_server;
+  const basic_tcp_server &_server;
   size_t _count;
 };
 
@@ -148,10 +144,10 @@ public:
   connection(const detail::connection_impl &impl);
   ~connection();
 
-  detail::connection_impl *impl() const { return _p.ptr; }
+  detail::connection_impl *impl() const { return _p.get(); }
 
   bool is_valid() const;
-  size_t id() const;
+  id_t id() const;
 
   size_t write(const void *ptr, size_t length);
   size_t read(void *ptr, size_t length);
@@ -161,7 +157,7 @@ public:
   bool force_read(void *ptr, size_t length);
 
 private:
-  detail::holder<detail::connection_impl> _p;
+  unique_ptr<detail::connection_impl> _p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -198,24 +194,26 @@ struct data_block
 #define HEADSOCKET_SERVER_CTOR(className, baseClassName) \
   className(int port): baseClassName(port) { }
 
-class basic_tcp_server
+class basic_tcp_server : public std::enable_shared_from_this<basic_tcp_server>
 {
 public:
-  virtual ~basic_tcp_server();
-
   void stop();
   bool is_running() const;
-  bool disconnect(basic_tcp_client *client);
+  bool disconnect(ptr<basic_tcp_client> client);
+  bool disconnect(id_t id);
 
 protected:
+  struct protected_tag { };
+
   explicit basic_tcp_server(int port);
+  virtual ~basic_tcp_server();
 
   virtual bool handshake(connection &conn) = 0;
-  virtual basic_tcp_client *accept(connection &conn) = 0;
-  virtual void client_connected(basic_tcp_client *client) = 0;
-  virtual void client_disconnected(basic_tcp_client *client) = 0;
+  virtual ptr<basic_tcp_client> accept(connection &conn) = 0;
+  virtual void client_connected(ptr<basic_tcp_client> client) = 0;
+  virtual void client_disconnected(ptr<basic_tcp_client> client) = 0;
 
-  detail::holder<detail::basic_tcp_server_impl> _p;
+  unique_ptr<detail::basic_tcp_server_impl> _p;
 
 private:
   template <typename T> friend class detail::enumerator;
@@ -225,7 +223,7 @@ private:
   size_t acquire_clients() const;
   void release_clients() const;
 
-  basic_tcp_client *client_at(size_t index) const;
+  ptr<basic_tcp_client> client_at(size_t index) const;
   size_t num_clients() const;
 
   void accept_thread();
@@ -240,11 +238,17 @@ class tcp_server : public basic_tcp_server
 public:
   typedef basic_tcp_server base_t;
   typedef T client_t;
+  typedef ptr<client_t> client_ptr;
 
-  explicit tcp_server(int port)
-    : base_t(port)
+  tcp_server(const protected_tag &, int port)
+    : tcp_server(port)
   {
+    
+  }
 
+  static ptr<tcp_server> create(int port)
+  {
+    return std::make_shared<tcp_server>(protected_tag{}, port);
   }
 
   virtual ~tcp_server()
@@ -254,21 +258,27 @@ public:
 
   detail::enumerator<T> clients() const
   {
-    return detail::enumerator<T>(this);
+    return detail::enumerator<T>(*this);
   }
 
 protected:
+  explicit tcp_server(int port)
+    : base_t(port)
+  {
+
+  }
+
   bool handshake(connection &conn) override
   {
     return true;
   }
 
-  virtual void client_connected(client_t *client)
+  virtual void client_connected(client_ptr client)
   {
 
   }
 
-  virtual void client_disconnected(client_t *client)
+  virtual void client_disconnected(client_ptr client)
   {
 
   }
@@ -276,35 +286,24 @@ protected:
 private:
   enum { needs_basic_tcp_client = T::is_basic_tcp_client };
 
-  basic_tcp_client *accept(connection &conn) override
+  ptr<basic_tcp_client> accept(connection &conn) override
   {
-    T *newClient = new T(this, conn);
-
-    if (!newClient->is_connected())
-    {
-      delete newClient;
-      newClient = nullptr;
-    }
-
-    return newClient;
+    ptr<basic_tcp_client> newClient = T::create(shared_from_this(), conn);
+    return newClient->is_connected() ? newClient : nullptr;
   }
 
-  void client_connected(basic_tcp_client *client) override
+  void client_connected(ptr<basic_tcp_client> client) override
   {
-    client_connected(reinterpret_cast<T *>(client));
+    client_connected(std::dynamic_pointer_cast<T>(client));
   }
 
-  void client_disconnected(basic_tcp_client *client) override
+  void client_disconnected(ptr<basic_tcp_client> client) override
   {
-    client_disconnected(reinterpret_cast<T *>(client));
+    client_disconnected(std::dynamic_pointer_cast<T>(client));
   }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-#define HEADSOCKET_CLIENT_CTOR(className, baseClassName) \
-  className(const char *address, int port): baseClassName(address, port) { } \
-  className(headsocket::basic_tcp_server *server, headsocket::connection &conn): baseClassName(server, conn) { }
 
 class basic_tcp_client
 {
@@ -318,28 +317,49 @@ public:
   bool disconnect();
   bool is_connected() const;
 
-  basic_tcp_server *server() const;
-  size_t id() const;
+  ptr<basic_tcp_server> server() const;
+  id_t id() const;
 
 protected:
+  struct protected_tag { };
+
   friend class basic_tcp_server;
 
   basic_tcp_client(const char *address, int port);
-  basic_tcp_client(basic_tcp_server *server, connection &conn);
+  basic_tcp_client(ptr<basic_tcp_server> server, connection &conn);
 
-  detail::holder<detail::basic_tcp_client_impl> _p;
+  unique_ptr<detail::basic_tcp_client_impl> _p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#define __HEADSOCKET_CLIENT_STATIC_CTORS(className) \
+  className(const protected_tag &, const char *address, int port): className(address, port) { } \
+  className(const protected_tag &, headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn): className(server, conn) { } \
+  static headsocket::ptr<className> create(const char *address, int port) { return std::make_shared<className>(protected_tag{}, address, port); } \
+  static headsocket::ptr<className> create(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn) { return std::make_shared<className>(protected_tag{}, server, conn); }
+
+#define HEADSOCKET_CLIENT_CTOR_BASE(className) \
+  protected: \
+    className(const char *address, int port); \
+    className(ptr<basic_tcp_server> server, connection &conn); \
+  public: \
+    __HEADSOCKET_CLIENT_STATIC_CTORS(className)
+
+#define HEADSOCKET_CLIENT_CTOR(className, baseClassName) \
+  protected: \
+    className(const char *address, int port): baseClassName(address, port) { } \
+    className(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn): baseClassName(server, conn) { } \
+  public: \
+    __HEADSOCKET_CLIENT_STATIC_CTORS(className)
+
 class tcp_client : public basic_tcp_client
 {
+  HEADSOCKET_CLIENT_CTOR_BASE(tcp_client);
+
 public:
   typedef basic_tcp_client base_t;
   enum { is_tcp_client };
-
-  tcp_client(const char *address, int port);
-  tcp_client(basic_tcp_server *server, connection &conn);
 
   virtual ~tcp_client();
 
@@ -355,13 +375,12 @@ public:
 
 class async_tcp_client : public basic_tcp_client
 {
+  HEADSOCKET_CLIENT_CTOR_BASE(async_tcp_client);
+
 public:
   typedef basic_tcp_client base_t;
   enum { is_async_tcp_client };
-
-  async_tcp_client(const char *address, int port);
-  async_tcp_client(basic_tcp_server *server, connection &conn);
-
+  
   virtual ~async_tcp_client();
 
   void push(const void *ptr, size_t length);
@@ -383,7 +402,7 @@ protected:
 
   void kill_threads();
 
-  detail::holder<detail::async_tcp_client_impl> _ap;
+  unique_ptr<detail::async_tcp_client_impl> _ap;
 
 private:
   void write_thread();
@@ -394,14 +413,13 @@ private:
 
 class web_socket_client : public async_tcp_client
 {
+  HEADSOCKET_CLIENT_CTOR_BASE(web_socket_client);
+  
 public:
   static const size_t frame_size_limit = 128 * 1024;
 
   typedef async_tcp_client base_t;
   enum { is_web_socket_client };
-
-  web_socket_client(const char *address, int port);
-  web_socket_client(basic_tcp_server *server, connection &conn);
 
   virtual ~web_socket_client();
 
@@ -436,10 +454,15 @@ class web_socket_server : public tcp_server<T>
 public:
   typedef tcp_server<T> base_t;
 
-  web_socket_server(int port)
-    : base_t(port)
+  web_socket_server(const protected_tag &, int port)
+    : web_socket_server(port)
   {
 
+  }
+
+  static ptr<web_socket_server> create(int port)
+  {
+    return std::make_shared<web_socket_server>(protected_tag{}, port);
   }
 
   virtual ~web_socket_server()
@@ -448,6 +471,12 @@ public:
   }
 
 protected:
+  web_socket_server(int port)
+    : base_t(port)
+  {
+
+  }
+
   bool handshake(connection &conn) override
   {
     return detail::websocket_handshake(conn);
@@ -1169,9 +1198,9 @@ namespace detail {
 struct basic_tcp_client_ref
 {
   size_t refCount = 0;
-  basic_tcp_client *client = nullptr;
+  ptr<basic_tcp_client> client;
 
-  basic_tcp_client_ref(basic_tcp_client *c)
+  basic_tcp_client_ref(ptr<basic_tcp_client> c)
     : client(c)
   {
   
@@ -1187,9 +1216,9 @@ struct basic_tcp_server_impl
   detail::semaphore disconnectSemaphore;
   int port = 0;
   detail::socket_type serverSocket = invalid_socket;
-  std::unique_ptr<std::thread> acceptThread;
-  std::unique_ptr<std::thread> disconnectThread;
-  size_t nextClientID = 1;
+  unique_ptr<std::thread> acceptThread;
+  unique_ptr<std::thread> disconnectThread;
+  id_t nextClientID = 1;
 
   basic_tcp_server_impl()
   {
@@ -1247,7 +1276,7 @@ void basic_tcp_server::stop()
     detail::close_socket(_p->serverSocket);
 
     {
-      detail::enumerator<basic_tcp_client> e(this);
+      detail::enumerator<basic_tcp_client> e(*this);
 
       for (auto client : e)
         client->disconnect();
@@ -1263,6 +1292,7 @@ void basic_tcp_server::stop()
     {
       _p->disconnectThreadQuit = true;
       _p->disconnectSemaphore.notify();
+
       _p->disconnectThread->join();
       _p->disconnectThread = nullptr;
     }
@@ -1276,7 +1306,7 @@ bool basic_tcp_server::is_running() const
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool basic_tcp_server::disconnect(basic_tcp_client *client)
+bool basic_tcp_server::disconnect(ptr<basic_tcp_client> client)
 {
   bool found = false;
 
@@ -1303,7 +1333,37 @@ bool basic_tcp_server::disconnect(basic_tcp_client *client)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-basic_tcp_client *basic_tcp_server::client_at(size_t index) const
+bool basic_tcp_server::disconnect(id_t id)
+{
+  bool found = false;
+
+  if (id)
+  {
+    ptr<basic_tcp_client> client;
+
+    {
+      HEADSOCKET_LOCK(_p->connections);
+      for (size_t i = 0, S = _p->connections->size(); i < S; ++i)
+        if (_p->connections->at(i).client->id() == id)
+        {
+          client = _p->connections->at(i).client;
+          found = true;
+          break;
+        }
+    }
+
+    if (found && !client->disconnect())
+    {
+      client_disconnected(client);
+      _p->disconnectSemaphore.notify();
+    }
+  }
+
+  return found;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+ptr<basic_tcp_client> basic_tcp_server::client_at(size_t index) const
 {
   HEADSOCKET_LOCK(_p->connections);
   return index < _p->connections->size() ? _p->connections->at(index).client : nullptr;
@@ -1345,13 +1405,10 @@ void basic_tcp_server::remove_disconnected() const
 
   while (i < _p->connections->size())
   {
-    detail::basic_tcp_client_ref clientRef = _p->connections.value[i];
+    auto &clientRef = _p->connections.value[i];
 
     if (!clientRef.client->is_connected() && clientRef.refCount == 0)
-    {
       _p->connections->erase(_p->connections->begin() + i);
-      delete clientRef.client;
-    }
     else
       ++i;
   }
@@ -1378,7 +1435,7 @@ void basic_tcp_server::accept_thread()
     {
       connection conn(conn_impl);
 
-      basic_tcp_client *newClient = nullptr;
+      ptr<basic_tcp_client> newClient;
       bool failed = false;
 
       if (handshake(conn))
@@ -1433,7 +1490,7 @@ struct basic_tcp_client_impl
 {
   std::atomic_int refCount;
   std::atomic_bool isConnected;
-  basic_tcp_server *server = nullptr;
+  weak_ptr<basic_tcp_server> server;
   connection conn = detail::connection_impl();
   std::string address = "";
   int port = 0;
@@ -1494,7 +1551,7 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-basic_tcp_client::basic_tcp_client(basic_tcp_server *server, connection &conn)
+basic_tcp_client::basic_tcp_client(ptr<basic_tcp_server> server, connection &conn)
   : _p(new detail::basic_tcp_client_impl())
 {
   _p->server = server;
@@ -1517,8 +1574,10 @@ bool basic_tcp_client::disconnect()
   {
     _p->conn.impl()->close();
 
-    if (_p->server)
-      _p->server->disconnect(this);
+    ptr<basic_tcp_server> s = server();
+
+    if (s)
+      s->disconnect(_p->conn.id());
   }
 
   return wasConnected;
@@ -1531,13 +1590,13 @@ bool basic_tcp_client::is_connected() const
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-basic_tcp_server *basic_tcp_client::server() const
+ptr<basic_tcp_server> basic_tcp_client::server() const
 {
-  return _p->server;
+  return _p->server.lock();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t basic_tcp_client::id() const
+id_t basic_tcp_client::id() const
 {
   return _p->conn.id();
 }
@@ -1552,7 +1611,7 @@ tcp_client::tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-tcp_client::tcp_client(basic_tcp_server *server, connection &conn)
+tcp_client::tcp_client(ptr<basic_tcp_server> server, connection &conn)
   : base_t(server, conn)
 {
 
@@ -1603,8 +1662,8 @@ struct async_tcp_client_impl
   detail::semaphore writeSemaphore;
   detail::lockable_value<detail::data_block_buffer> writeBlocks;
   detail::lockable_value<detail::data_block_buffer> readBlocks;
-  std::unique_ptr<std::thread> writeThread;
-  std::unique_ptr<std::thread> readThread;
+  unique_ptr<std::thread> writeThread;
+  unique_ptr<std::thread> readThread;
 };
 
 }
@@ -1620,7 +1679,7 @@ async_tcp_client::async_tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-async_tcp_client::async_tcp_client(basic_tcp_server *server, connection &conn)
+async_tcp_client::async_tcp_client(ptr<basic_tcp_server> server, connection &conn)
   : base_t(server, conn)
   , _ap(new detail::async_tcp_client_impl())
 {
@@ -1821,7 +1880,7 @@ web_socket_client::web_socket_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-web_socket_client::web_socket_client(basic_tcp_server *server, connection &conn)
+web_socket_client::web_socket_client(ptr<basic_tcp_server> server, connection &conn)
   : base_t(server, conn)
 {
 
