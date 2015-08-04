@@ -29,7 +29,7 @@ If you are looking for something *production ready*, safe and fast, you should p
 
 <a id="example1"></a>
 ### Quickstart example 1 *(asynchronous)*
-In this example server accepts and creates client connections asynchronously and every client gets asynchronous callback `asyncReceivedData` when complete data block is received (continuation WebSocket frames are resolved automaticaly):
+In this example server accepts and creates client connections asynchronously and every client gets asynchronous callback `async_received_data` when complete data block is received (continuation WebSocket frames are resolved automaticaly):
 ```cpp
 #include <iostream>
 
@@ -136,14 +136,14 @@ Abstract class for handling incomming connections. You should never create an in
 - `bool` **`is_running()`** `const`: Returns `true` if server is still running.
 - `void` **`disconnect(basic_tcp_client *client)`**: Forcibly disconnects a client.
 
-If you want to derive your own `BaseTcpServer`, you are required to implement these methods:
+If you want to derive your own `basic_tcp_server`, you are required to implement these methods:
 
-- `bool` **`handshake(ConnectionParams *params)`**: Right after server accepts new socket connection, you can optionaly do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
-- `basic_tcp_client *` **`accept(ConnectionParams *params)`**: Called by the server after handshake is successfuly done. This is a factory method for creating your own instances of `BaseTcpClient` classes. If you are not able to create client instance, return `nullptr`.
-- `void` **`client_connected(basic_tcp_client *client)`**: Called when new client is successfuly created by previous `clientAccept` call.
+- `bool` **`handshake(connection &conn)`**: Right after server accepts new socket connection, you can optionaly do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
+- `basic_tcp_client *` **`accept(connection &conn)`**: Called by the server after handshake is successfuly done. This is a factory method for creating your own instances of `basic_tcp_client` classes. If you are not able to create client instance, return `nullptr`.
+- `void` **`client_connected(basic_tcp_client *client)`**: Called when new client is successfuly created by previous `accept` call.
 - `void` **`client_disconnected(basic_tcp_client *client)`**: Called before client is disconnected by server.
 
-When constructed, `basic_tcp_server` automaticaly spawns two helper threads; one for accepting incomming connections and one for closing disconnected clients. You can take a look at `basic_tcp_server::acceptThread` implementation to see how the new incomming connections are handled with `handshake`, `accept` and `client_connected` calls.
+When constructed, `basic_tcp_server` automaticaly spawns two helper threads; one for accepting incomming connections and one for closing disconnected clients. You can take a look at `basic_tcp_server::accept_thread` implementation to see how the new incomming connections are handled with `handshake`, `accept` and `client_connected` calls.
 
 ----------
 
@@ -171,7 +171,7 @@ Public interface provides:
 - `void` **`disconnect()`**: Disconnects this client from the server.
 - `bool` **`is_connected()`** `const`: Returns `true` if client is still connected.
 - `basic_tcp_server *` **`server()`** `const`: Returns server instance which originaly created this client. Could be `nullptr` if client was created manually.
-- `size_t` **`id()`** `const`: Returns ID assigned by server.
+- `id_t` **`id()`** `const`: Returns ID assigned by server.
 
 ----------
 
