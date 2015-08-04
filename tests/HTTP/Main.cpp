@@ -24,18 +24,13 @@ public:
     stop();
   }
 
-  class request
-  {
-  
-  };
-
   class response
   {
   
   };
   
 protected:
-  virtual void request(const request &req, response &resp)
+  virtual void request(response &resp)
   {
   
   }
