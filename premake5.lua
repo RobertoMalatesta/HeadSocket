@@ -42,5 +42,5 @@ group ""
   kind "StaticLib"
   language("C++")
   defines { "HEADSOCKET_IMPLEMENTATION" }
-  files { "*.h" }
+  files { "*.h", "README.md" }
   removeplatforms "*" -- Make sure we do not build this

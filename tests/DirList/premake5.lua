@@ -6,4 +6,5 @@ generateProject(
 	language = "C++",
 })
 
+files { "DirList.html" }
 debugdir "C:\\"
