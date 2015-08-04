@@ -19,34 +19,6 @@ Usage:
 
 #include <stdint.h>
 
-#ifndef HEADSOCKET_PLATFORM_OVERRIDE
-#ifdef _WIN32
-#define HEADSOCKET_PLATFORM_WINDOWS
-#elif __ANDROID__
-#define HEADSOCKET_PLATFORM_ANDROID
-#define HEADSOCKET_PLATFORM_NIX
-#elif __APPLE__
-#include "TargetConditionals.h"
-#ifdef TARGET_OS_MAC
-#define HEADSOCKET_PLATFORM_MAC
-#endif
-#elif __linux
-#define HEADSOCKET_PLATFORM_NIX
-#elif __unix
-#define HEADSOCKET_PLATFORM_NIX
-#elif __posix
-#define HEADSOCKET_PLATFORM_NIX
-#else
-#error Unsupported platform!
-#endif
-#endif
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scope_lock##suffix(var);
-#define HEADSOCKET_LOCK_SUFFIX2(var, suffix) HEADSOCKET_LOCK_SUFFIX(var, suffix)
-#define HEADSOCKET_LOCK(var) HEADSOCKET_LOCK_SUFFIX2(var, __LINE__)
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace headsocket {
@@ -502,6 +474,32 @@ private:
 #include <condition_variable>
 #include <memory>
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HEADSOCKET_PLATFORM_OVERRIDE
+#ifdef _WIN32
+#define HEADSOCKET_PLATFORM_WINDOWS
+#elif __ANDROID__
+#define HEADSOCKET_PLATFORM_ANDROID
+#define HEADSOCKET_PLATFORM_NIX
+#elif __APPLE__
+#include "TargetConditionals.h"
+#ifdef TARGET_OS_MAC
+#define HEADSOCKET_PLATFORM_MAC
+#endif
+#elif __linux
+#define HEADSOCKET_PLATFORM_NIX
+#elif __unix
+#define HEADSOCKET_PLATFORM_NIX
+#elif __posix
+#define HEADSOCKET_PLATFORM_NIX
+#else
+#error Unsupported platform!
+#endif
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #if defined(HEADSOCKET_PLATFORM_WINDOWS)
 #pragma comment(lib, "ws2_32.lib")
 #include <WinSock2.h>
@@ -514,6 +512,14 @@ private:
 #include <unistd.h>
 #include <netdb.h>
 #endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define HEADSOCKET_LOCK_SUFFIX(var, suffix) std::lock_guard<decltype(var)> __scope_lock##suffix(var);
+#define HEADSOCKET_LOCK_SUFFIX2(var, suffix) HEADSOCKET_LOCK_SUFFIX(var, suffix)
+#define HEADSOCKET_LOCK(var) HEADSOCKET_LOCK_SUFFIX2(var, __LINE__)
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace headsocket {
 
