@@ -129,7 +129,7 @@ int main()
 
 ----------
 
-### headsocket::`basic_tcp_server`
+### `basic_tcp_server`
 Abstract class for handling incomming connections. You should never create an instance of it directly, since it acts only as a factory base for derived classes, such as `tcp_server<T>` or `web_socket_server<T>`. Public interface provides only those methods:
 
 - `void` **`stop()`** : Stops the server, disconnects all clients.
@@ -147,7 +147,7 @@ When constructed, `basic_tcp_server` automaticaly spawns two helper threads; one
 
 ----------
 
-### headsocket::`tcp_server<T>`
+### `tcp_server<T>`
 Concrete implementation of `basic_tcp_server` that makes sure you are not working against `basic_tcp_client` instances, but rather with clients of specified type `<T>`, where `<T>` **must** be derived from `basic_tcp_client`. This is done by making sure that:
 
 - `basic_tcp_server::accept` is overriden and returns new instances of `<T>`
@@ -163,7 +163,7 @@ Public interface provides this extra method:
 
 ----------
 
-### headsocket::`basic_tcp_client`
+### `basic_tcp_client`
 Abstract class for connected clients with very basic interface. You should not try to create instance of this class directly, since there are no methods for sending or receiving data.
 
 Public interface provides:
@@ -175,7 +175,7 @@ Public interface provides:
 
 ----------
 
-### headsocket::`tcp_client`
+### `tcp_client`
 Concrete implementation of `basic_tcp_client`, allows sending and receiving data **synchronously**.
 
 Public interface provides these extra methods:
@@ -189,7 +189,7 @@ Public interface provides these extra methods:
 
 ----------
 
-### headsocket::`async_tcp_client`
+### `async_tcp_client`
 Another concrete implementation of `basic_tcp_client`, allows sending and receiving data **asynchronously**.
 
 Public interface provides these extra methods:
@@ -207,7 +207,7 @@ When constructed, `async_tcp_client` spawns two threads for sending and receivin
 
 ----------
 
-### headsocket::`web_socket_client`
+### `web_socket_client`
 Extended implementation of `async_tcp_client` that handles WebSocket connections and hides away most communication details (parsing frame headers, frame continuation, etc.).
 
 Public interface provides this extra method:
@@ -217,7 +217,7 @@ Public interface provides this extra method:
 
 ----------
 
-### headsocket::`web_socket_server<T>`
+### `web_socket_server<T>`
 Extended implementation of `tcp_server<T>`, where `<T>` **must** be derived from `web_socket_client`. The only difference between this and `tcp_server<T>` is additional handling of WebSocket handshake. Rest of the behaviour is handled by `tcp_server<T>` itself.
 
 
