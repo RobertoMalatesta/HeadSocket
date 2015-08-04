@@ -8,11 +8,11 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Client : public headsocket::web_socket_client
+class client : public headsocket::web_socket_client
 {
-public:
-  HEADSOCKET_CLIENT_CTOR(Client, headsocket::web_socket_client);
+  HEADSOCKET_CLIENT(client, headsocket::web_socket_client);
 
+public:
   bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length) override
   {
     // Ignore nontextual opcodes
@@ -97,11 +97,11 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Server : public headsocket::web_socket_server<Client>
+class server : public headsocket::web_socket_server<client>
 {
-public:
-  HEADSOCKET_SERVER_CTOR(Server, headsocket::web_socket_server<Client>);
+  HEADSOCKET_SERVER(server, headsocket::web_socket_server<client>);
 
+public:
   void client_connected(client_ptr client) override
   {
     std::cout << "Client " << client->id() << " connected!" << std::endl;
@@ -118,9 +118,9 @@ public:
 int main(int argc, char *argv[])
 {
   int port = 42666;
-  Server server(port);
+  auto s = server::create(port);
 
-  if (server.is_running())
+  if (s->is_running())
     std::cout << "Directory listing server is running at port " << port << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;

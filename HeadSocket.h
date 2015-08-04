@@ -191,9 +191,6 @@ struct data_block
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define HEADSOCKET_SERVER_CTOR(className, baseClassName) \
-  className(int port): baseClassName(port) { }
-
 class basic_tcp_server : public std::enable_shared_from_this<basic_tcp_server>
 {
 public:
@@ -231,6 +228,9 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define HEADSOCKET_SERVER(className, baseClassName) \
+  className(int port): baseClassName(port) { }
 
 template <typename T>
 class tcp_server : public basic_tcp_server
@@ -339,14 +339,14 @@ protected:
   static headsocket::ptr<className> create(const char *address, int port) { return std::make_shared<className>(protected_tag{}, address, port); } \
   static headsocket::ptr<className> create(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn) { return std::make_shared<className>(protected_tag{}, server, conn); }
 
-#define HEADSOCKET_CLIENT_CTOR_BASE(className) \
+#define HEADSOCKET_CLIENT_BASE(className) \
   protected: \
     className(const char *address, int port); \
     className(ptr<basic_tcp_server> server, connection &conn); \
   public: \
     __HEADSOCKET_CLIENT_STATIC_CTORS(className)
 
-#define HEADSOCKET_CLIENT_CTOR(className, baseClassName) \
+#define HEADSOCKET_CLIENT(className, baseClassName) \
   protected: \
     className(const char *address, int port): baseClassName(address, port) { } \
     className(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn): baseClassName(server, conn) { } \
@@ -355,7 +355,7 @@ protected:
 
 class tcp_client : public basic_tcp_client
 {
-  HEADSOCKET_CLIENT_CTOR_BASE(tcp_client);
+  HEADSOCKET_CLIENT_BASE(tcp_client);
 
 public:
   typedef basic_tcp_client base_t;
@@ -375,7 +375,7 @@ public:
 
 class async_tcp_client : public basic_tcp_client
 {
-  HEADSOCKET_CLIENT_CTOR_BASE(async_tcp_client);
+  HEADSOCKET_CLIENT_BASE(async_tcp_client);
 
 public:
   typedef basic_tcp_client base_t;
@@ -413,7 +413,7 @@ private:
 
 class web_socket_client : public async_tcp_client
 {
-  HEADSOCKET_CLIENT_CTOR_BASE(web_socket_client);
+  HEADSOCKET_CLIENT_BASE(web_socket_client);
   
 public:
   static const size_t frame_size_limit = 128 * 1024;

@@ -10,9 +10,9 @@
 
 class Client : public headsocket::web_socket_client
 {
-public:
-  HEADSOCKET_CLIENT_CTOR(Client, headsocket::web_socket_client);
+  HEADSOCKET_CLIENT(Client, headsocket::web_socket_client);
 
+public:
   virtual ~Client()
   {
     if (_xmContext)
