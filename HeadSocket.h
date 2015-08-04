@@ -52,8 +52,7 @@ Usage:
 namespace headsocket {
 
 /* Forward declarations */
-struct ConnectionParams;
-
+class connection;
 class basic_tcp_server;
 class basic_tcp_client;
 class tcp_client;
@@ -68,6 +67,10 @@ struct connection_impl;
 struct basic_tcp_server_impl;
 struct basic_tcp_client_impl;
 struct async_tcp_client_impl;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static const size_t line_buffer_size = 1024;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -153,7 +156,7 @@ public:
   }
 
 private:
-  enum { needs_base_tcp_client = T::is_base_tcp_client };
+  enum { needs_basic_tcp_client = T::is_basic_tcp_client };
 
   const basic_tcp_server *_server;
   size_t _count;
@@ -161,7 +164,7 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static bool websocket_handshake(ConnectionParams *params);
+static bool websocket_handshake(connection &conn);
 
 }
 
@@ -174,6 +177,9 @@ public:
   ~connection();
 
   detail::connection_impl *impl() const { return _p.ptr; }
+
+  bool is_valid() const;
+  size_t id() const;
 
   size_t write(const void *ptr, size_t length);
   size_t read(void *ptr, size_t length);
@@ -232,8 +238,8 @@ public:
 protected:
   explicit basic_tcp_server(int port);
 
-  virtual bool handshake(ConnectionParams *params) = 0;
-  virtual basic_tcp_client *accept(ConnectionParams *params) = 0;
+  virtual bool handshake(connection &conn) = 0;
+  virtual basic_tcp_client *accept(connection &conn) = 0;
   virtual void client_connected(basic_tcp_client *client) = 0;
   virtual void client_disconnected(basic_tcp_client *client) = 0;
 
@@ -280,7 +286,7 @@ public:
   }
 
 protected:
-  bool handshake(ConnectionParams *params) override
+  bool handshake(connection &conn) override
   {
     return true;
   }
@@ -296,11 +302,11 @@ protected:
   }
 
 private:
-  enum { needs_base_tcp_client = T::is_base_tcp_client };
+  enum { needs_basic_tcp_client = T::is_basic_tcp_client };
 
-  basic_tcp_client *accept(ConnectionParams *params) override
+  basic_tcp_client *accept(connection &conn) override
   {
-    T *newClient = new T(this, params);
+    T *newClient = new T(this, conn);
 
     if (!newClient->is_connected())
     {
@@ -326,12 +332,12 @@ private:
 
 #define HEADSOCKET_CLIENT_CTOR(className, baseClassName) \
   className(const char *address, int port): baseClassName(address, port) { } \
-  className(headsocket::basic_tcp_server *server, headsocket::ConnectionParams *params): baseClassName(server, params) { }
+  className(headsocket::basic_tcp_server *server, headsocket::connection &conn): baseClassName(server, conn) { }
 
 class basic_tcp_client
 {
 public:
-  enum { is_base_tcp_client };
+  enum { is_basic_tcp_client };
 
   static const size_t invalid_operation = static_cast<size_t>(-1);
 
@@ -347,7 +353,7 @@ protected:
   friend class basic_tcp_server;
 
   basic_tcp_client(const char *address, int port);
-  basic_tcp_client(basic_tcp_server *server, ConnectionParams *params);
+  basic_tcp_client(basic_tcp_server *server, connection &conn);
 
   detail::holder<detail::basic_tcp_client_impl> _p;
 };
@@ -361,7 +367,7 @@ public:
   enum { is_tcp_client };
 
   tcp_client(const char *address, int port);
-  tcp_client(basic_tcp_server *server, ConnectionParams *params);
+  tcp_client(basic_tcp_server *server, connection &conn);
 
   virtual ~tcp_client();
 
@@ -382,7 +388,7 @@ public:
   enum { is_async_tcp_client };
 
   async_tcp_client(const char *address, int port);
-  async_tcp_client(basic_tcp_server *server, ConnectionParams *params);
+  async_tcp_client(basic_tcp_server *server, connection &conn);
 
   virtual ~async_tcp_client();
 
@@ -423,7 +429,7 @@ public:
   enum { is_web_socket_client };
 
   web_socket_client(const char *address, int port);
-  web_socket_client(basic_tcp_server *server, ConnectionParams *params);
+  web_socket_client(basic_tcp_server *server, connection &conn);
 
   virtual ~web_socket_client();
 
@@ -470,9 +476,9 @@ public:
   }
 
 protected:
-  bool handshake(ConnectionParams *params) override
+  bool handshake(connection &conn) override
   {
-    return detail::websocket_handshake(params);
+    return detail::websocket_handshake(conn);
   }
 
 private:
@@ -946,42 +952,14 @@ struct ConnectionParams
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t socketReadLine(detail::socket_type socket, void *ptr, size_t length)
-{
-  if (!ptr || !length)
-    return 0;
-
-  size_t result = 0;
-
-  while (result < length - 1)
-  {
-    char ch;
-    int r = recv(socket, &ch, 1, 0);
-
-    if (!r || r == detail::socket_error)
-      return 0;
-
-    if (r != 1 || ch == '\n')
-      break;
-
-    if (ch != '\r')
-      reinterpret_cast<char *>(ptr)[result++] = ch;
-  }
-
-  reinterpret_cast<char *>(ptr)[result++] = 0;
-
-  return result;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-bool detail::websocket_handshake(ConnectionParams *params)
+bool detail::websocket_handshake(connection &conn)
 {
   std::string key;
-  char lineBuffer[256];
+  char lineBuffer[detail::line_buffer_size];
 
   while (true)
   {
-    size_t result = socketReadLine(params->clientSocket, lineBuffer, 256);
+    size_t result = conn.read_line(lineBuffer, 256);
 
     if (result <= 1)
       break;
@@ -1006,7 +984,7 @@ bool detail::websocket_handshake(ConnectionParams *params)
   response += lineBuffer;
   response += "\n\n";
 
-  return send(params->clientSocket, response.c_str(), response.length(), 0) == response.length();
+  return conn.force_write(response.c_str(), response.length());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1015,35 +993,179 @@ namespace detail {
   
 struct connection_impl
 {
+  detail::socket_type socket = detail::invalid_socket;
+  sockaddr_in from;
+  size_t id = 0;
+
   void assign(const connection_impl &impl)
   {
-    
+    socket = impl.socket;
+    from = impl.from;
+    id = impl.id;
+  }
+
+  void close()
+  {
+    if (socket != detail::invalid_socket)
+    {
+      detail::close_socket(socket);
+      socket = detail::invalid_socket;
+    }
   }
 };
 
 }
 
+//---------------------------------------------------------------------------------------------------------------------
 connection::connection(const detail::connection_impl &impl)
   : _p(new detail::connection_impl())
 {
   _p->assign(impl);
 }
 
+//---------------------------------------------------------------------------------------------------------------------
 connection::~connection()
 {
   
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool connection::is_valid() const
+{
+  return _p->socket != detail::invalid_socket;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t connection::id() const
+{
+  return _p->id;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t connection::write(const void *ptr, size_t length)
+{
+  if (!is_valid())
+    return detail::socket_error;
+
+  if (!ptr || !length)
+    return 0;
+
+  int result = send(_p->socket, static_cast<const char *>(ptr), length, 0);
+
+  if (!result || result == detail::socket_error)
+    return 0;
+
+  return static_cast<size_t>(result);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool connection::force_write(const void *ptr, size_t length)
+{
+  if (!is_valid())
+    return false;
+
+  if (!ptr)
+    return true;
+
+  const char *chPtr = static_cast<const char *>(ptr);
+
+  while (length)
+  {
+    int result = send(_p->socket, chPtr, length, 0);
+
+    if (!result || result == detail::socket_error)
+      return false;
+
+    length -= static_cast<size_t>(result);
+    chPtr += result;
+  }
+
+  return true;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t connection::read(void *ptr, size_t length)
+{
+  if (!is_valid())
+    return detail::socket_error;
+
+  if (!ptr || !length)
+    return 0;
+
+  int result = recv(_p->socket, static_cast<char *>(ptr), length, 0);
+
+  if (!result || result == detail::socket_error)
+    return 0;
+
+  return static_cast<size_t>(result);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+size_t connection::read_line(void *ptr, size_t length)
+{
+  if (!is_valid())
+    return detail::socket_error;
+
+  if (!ptr || !length)
+    return 0;
+
+  size_t result = 0;
+
+  while (result < length - 1)
+  {
+    char ch;
+    int r = recv(_p->socket, &ch, 1, 0);
+
+    if (!r || r == detail::socket_error)
+      return 0;
+
+    if (r != 1 || ch == '\n')
+      break;
+
+    if (ch != '\r')
+      reinterpret_cast<char *>(ptr)[result++] = ch;
+  }
+
+  reinterpret_cast<char *>(ptr)[result++] = 0;
+
+  return result;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool connection::force_read(void *ptr, size_t length)
+{
+  if (!is_valid())
+    return false;
+
+  if (!ptr)
+    return true;
+
+  char *chPtr = static_cast<char *>(ptr);
+
+  while (length)
+  {
+    int result = recv(_p->socket, chPtr, length, 0);
+
+    if (!result || result == detail::socket_error)
+      return false;
+
+    length -= static_cast<size_t>(result);
+    chPtr += result;
+  }
+
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
 
-struct BaseTcpClientRef
+struct basic_tcp_client_ref
 {
   size_t refCount = 0;
   basic_tcp_client *client = nullptr;
 
-  BaseTcpClientRef(basic_tcp_client *c)
+  basic_tcp_client_ref(basic_tcp_client *c)
     : client(c)
   {
   
@@ -1055,7 +1177,7 @@ struct basic_tcp_server_impl
   std::atomic_bool isRunning;
   std::atomic_bool disconnectThreadQuit;
   sockaddr_in local;
-  detail::lockable_value<std::vector<BaseTcpClientRef>> connections;
+  detail::lockable_value<std::vector<basic_tcp_client_ref>> connections;
   detail::semaphore disconnectSemaphore;
   int port = 0;
   detail::socket_type serverSocket = invalid_socket;
@@ -1217,7 +1339,7 @@ void basic_tcp_server::remove_disconnected() const
 
   while (i < _p->connections->size())
   {
-    detail::BaseTcpClientRef clientRef = _p->connections.value[i];
+    detail::basic_tcp_client_ref clientRef = _p->connections.value[i];
 
     if (!clientRef.client->is_connected() && clientRef.refCount == 0)
     {
@@ -1236,9 +1358,9 @@ void basic_tcp_server::accept_thread()
 
   while (_p->isRunning)
   {
-    ConnectionParams params;
-    params.clientSocket = ::accept(_p->serverSocket, reinterpret_cast<struct sockaddr *>(&params.from), nullptr);
-    params.id = _p->nextClientID++;
+    detail::connection_impl conn_impl;
+    conn_impl.socket = ::accept(_p->serverSocket, reinterpret_cast<struct sockaddr *>(&conn_impl.from), nullptr);
+    conn_impl.id = _p->nextClientID++;
 
     if (!_p->nextClientID)
       ++_p->nextClientID;
@@ -1246,17 +1368,20 @@ void basic_tcp_server::accept_thread()
     if (!_p->isRunning)
       break;
 
-    if (params.clientSocket != detail::invalid_socket)
+    if (conn_impl.socket != detail::invalid_socket)
     {
+      connection conn(conn_impl);
+
       basic_tcp_client *newClient = nullptr;
       bool failed = false;
 
-      if (handshake(&params))
+      if (handshake(conn))
       {
-        HEADSOCKET_LOCK(_p->connections);
-
-        if (newClient = accept(&params))
+        if (newClient = accept(conn))
+        {
+          HEADSOCKET_LOCK(_p->connections);
           _p->connections->push_back(newClient);
+        }
         else
           failed = true;
       }
@@ -1265,7 +1390,7 @@ void basic_tcp_server::accept_thread()
 
       if (failed)
       {
-        detail::close_socket(params.clientSocket);
+        conn_impl.close();
         --_p->nextClientID;
 
         if (!_p->nextClientID)
@@ -1302,10 +1427,8 @@ struct basic_tcp_client_impl
 {
   std::atomic_int refCount;
   std::atomic_bool isConnected;
-  sockaddr_in from;
-  size_t id = 0;
   basic_tcp_server *server = nullptr;
-  socket_type clientSocket = invalid_socket;
+  connection conn = detail::connection_impl();
   std::string address = "";
   int port = 0;
 
@@ -1339,15 +1462,15 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
 
   for (ptr = result; ptr != nullptr; ptr = ptr->ai_next)
   {
-    _p->clientSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
+    _p->conn.impl()->socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
 
-    if (_p->clientSocket == detail::invalid_socket)
+    if (!_p->conn.is_valid())
       return;
 
-    if (connect(_p->clientSocket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == detail::socket_error)
+    if (connect(_p->conn.impl()->socket, ptr->ai_addr, static_cast<int>(ptr->ai_addrlen)) == detail::socket_error)
     {
-      detail::close_socket(_p->clientSocket);
-      _p->clientSocket = detail::invalid_socket;
+      detail::close_socket(_p->conn.impl()->socket);
+      _p->conn.impl()->socket = detail::invalid_socket;
       continue;
     }
 
@@ -1356,7 +1479,7 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
 
   freeaddrinfo(result);
 
-  if (_p->clientSocket == detail::invalid_socket)
+  if (!_p->conn.is_valid())
     return;
 
   _p->address = address;
@@ -1365,13 +1488,11 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-basic_tcp_client::basic_tcp_client(basic_tcp_server *server, ConnectionParams *params)
+basic_tcp_client::basic_tcp_client(basic_tcp_server *server, connection &conn)
   : _p(new detail::basic_tcp_client_impl())
 {
   _p->server = server;
-  _p->clientSocket = params->clientSocket;
-  _p->from = params->from;
-  _p->id = params->id;
+  _p->conn.impl()->assign(*(conn.impl()));
   _p->isConnected = true;
 }
 
@@ -1388,11 +1509,7 @@ bool basic_tcp_client::disconnect()
 
   if (wasConnected)
   {
-    if (_p->clientSocket != detail::invalid_socket)
-    {
-      detail::close_socket(_p->clientSocket);
-      _p->clientSocket = detail::invalid_socket;
-    }
+    _p->conn.impl()->close();
 
     if (_p->server)
       _p->server->disconnect(this);
@@ -1416,7 +1533,7 @@ basic_tcp_server *basic_tcp_client::server() const
 //---------------------------------------------------------------------------------------------------------------------
 size_t basic_tcp_client::id() const
 {
-  return _p->id;
+  return _p->conn.id();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1429,8 +1546,8 @@ tcp_client::tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-tcp_client::tcp_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_t(server, params)
+tcp_client::tcp_client(basic_tcp_server *server, connection &conn)
+  : base_t(server, conn)
 {
 
 }
@@ -1444,101 +1561,31 @@ tcp_client::~tcp_client()
 //---------------------------------------------------------------------------------------------------------------------
 size_t tcp_client::write(const void *ptr, size_t length)
 {
-  if (!ptr || !length)
-    return 0;
-
-  int result = send(_p->clientSocket, static_cast<const char *>(ptr), length, 0);
-
-  if (!result || result == detail::socket_error)
-    return 0;
-
-  return static_cast<size_t>(result);
+  return _p->conn.write(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 bool tcp_client::force_write(const void *ptr, size_t length)
 {
-  if (!ptr)
-    return true;
-
-  const char *chPtr = static_cast<const char *>(ptr);
-
-  while (length)
-  {
-    int result = send(_p->clientSocket, chPtr, length, 0);
-
-    if (!result || result == detail::socket_error)
-      return false;
-
-    length -= static_cast<size_t>(result);
-    chPtr += result;
-  }
-
-  return true;
+  return _p->conn.force_write(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t tcp_client::read(void *ptr, size_t length)
 {
-  if (!ptr || !length)
-    return 0;
-
-  int result = recv(_p->clientSocket, static_cast<char *>(ptr), length, 0);
-
-  if (!result || result == detail::socket_error)
-    return 0;
-
-  return static_cast<size_t>(result);
+  return _p->conn.read(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t tcp_client::read_line(void *ptr, size_t length)
 {
-  if (!ptr || !length)
-    return 0;
-
-  size_t result = 0;
-
-  while (result < length - 1)
-  {
-    char ch;
-    int r = recv(_p->clientSocket, &ch, 1, 0);
-
-    if (!r || r == detail::socket_error)
-      return 0;
-
-    if (r != 1 || ch == '\n')
-      break;
-
-    if (ch != '\r')
-      reinterpret_cast<char *>(ptr)[result++] = ch;
-  }
-
-  reinterpret_cast<char *>(ptr)[result++] = 0;
-
-  return result;
+  return _p->conn.read_line(ptr, length);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 bool tcp_client::force_read(void *ptr, size_t length)
 {
-  if (!ptr)
-    return true;
-
-  char *chPtr = static_cast<char *>(ptr);
-
-  while (length)
-  {
-    int result = recv(_p->clientSocket, chPtr, length, 0);
-
-    if (!result || result == detail::socket_error)
-      return false;
-
-    length -= static_cast<size_t>(result);
-    chPtr += result;
-  }
-
-  return true;
+  return _p->conn.force_read(ptr, length);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1567,8 +1614,8 @@ async_tcp_client::async_tcp_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-async_tcp_client::async_tcp_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_t(server, params)
+async_tcp_client::async_tcp_client(basic_tcp_server *server, connection &conn)
+  : base_t(server, conn)
   , _ap(new detail::async_tcp_client_impl())
 {
   init_threads();
@@ -1669,7 +1716,7 @@ void async_tcp_client::write_thread()
 
       while (written)
       {
-        int result = send(_p->clientSocket, cursor, written, 0);
+        int result = send(_p->conn.impl()->socket, cursor, written, 0);
 
         if (!result || result == detail::socket_error)
           break;
@@ -1715,7 +1762,7 @@ void async_tcp_client::read_thread()
 
       if (!result || !consumed)
       {
-        result = recv(_p->clientSocket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
+        result = recv(_p->conn.impl()->socket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
 
         if (!result || result == detail::socket_error)
         {
@@ -1768,8 +1815,8 @@ web_socket_client::web_socket_client(const char *address, int port)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-web_socket_client::web_socket_client(basic_tcp_server *server, ConnectionParams *params)
-  : base_t(server, params)
+web_socket_client::web_socket_client(basic_tcp_server *server, connection &conn)
+  : base_t(server, conn)
 {
 
 }

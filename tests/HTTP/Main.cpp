@@ -4,33 +4,74 @@
 #define HEADSOCKET_IMPLEMENTATION
 #include <HeadSocket.h>
 
-class HTTPServer : public headsocket::tcp_server<headsocket::tcp_client>
+namespace headsocket {
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class http_server : public tcp_server<tcp_client>
 {
 public:
-  HEADSOCKET_SERVER_CTOR(HTTPServer, headsocket::tcp_server<headsocket::tcp_client>);
-
-protected:
-  void client_connected(client_t *client) override
+  typedef tcp_server<tcp_client> base_t;
+  
+  http_server(int port)
+    : base_t(port)
   {
-    std::cout << "Client " << client->id() << " connected!" << std::endl;
+  
+  }
 
-    char lineBuffer[256];
+  ~http_server()
+  {
+    stop();
+  }
+
+  class request
+  {
+  
+  };
+
+  class response
+  {
+  
+  };
+  
+protected:
+  virtual void request(const request &req, response &resp)
+  {
+  
+  }
+
+  bool handshake(connection &conn) final override
+  {
+    char lineBuffer[1024];
     while (true)
     {
-      size_t result = client->read_line(lineBuffer, 256);
+      size_t result = conn.read_line(lineBuffer, 1024);
       if (result <= 1) break;
 
       printf("%s\n", lineBuffer);
     }
 
-    client->disconnect();
+    return false;
   }
+
+  tcp_client *accept(connection &conn) final override
+  {
+    return nullptr;
+  }
+
+  void client_connected(basic_tcp_client *client) final override { }
+  void client_disconnected(basic_tcp_client *client) final override { }
+
+private:
+
 };
+
+}
 
 int main()
 {
   int port = 10666;
-  HTTPServer server(port);
+  headsocket::http_server server(port);
 
   if (server.is_running())
     std::cout << "HTTP server listening at port " << port << std::endl;
