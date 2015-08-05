@@ -339,7 +339,7 @@ public:
   virtual ~async_tcp_client();
 
   void push(const void *ptr, size_t length);
-  void push(const char *text);
+  void push(const std::string &text);
   size_t peek() const;
   size_t pop(void *ptr, size_t length);
 
@@ -1583,9 +1583,9 @@ void async_tcp_client::push(const void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-void async_tcp_client::push(const char *text)
+void async_tcp_client::push(const std::string &text)
 {
-  push(text, text ? strlen(text) : 0, opcode::text);
+  push(text.c_str(), text.length(), opcode::text);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
