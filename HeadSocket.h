@@ -48,102 +48,7 @@ struct async_tcp_client_impl;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <typename T>
-class enumerator
-{
-public:
-  explicit enumerator(const basic_tcp_server &server)
-    : _server(server)
-  {
-    _count = _server.acquire_clients();
-  }
-
-  ~enumerator()
-  {
-    _server.release_clients();
-  }
-
-  const basic_tcp_server &server() const { return _server; }
-
-  size_t size() const { return _count; }
-
-  struct iterator
-  {
-    enumerator *e;
-    size_t index;
-
-    iterator(enumerator *enu, size_t idx)
-      : e(enu)
-      , index(idx)
-    {
-
-    }
-
-    bool operator==(const iterator &iter) const { return iter.index == index && iter.e == e; }
-
-    bool operator!=(const iterator &iter) const { return iter.index != index || iter.e != e; }
-
-    ptr<T> operator*() const { return std::dynamic_pointer_cast<T>(e->server().client_at(index)); }
-
-    iterator &operator++()
-    {
-      ++index;
-      return *this;
-    }
-  };
-
-  iterator begin() { return iterator(this, 0); }
-
-  iterator end() { return iterator(this, _count); }
-
-private:
-  enum { needs_basic_tcp_client = T::is_basic_tcp_client };
-
-  const basic_tcp_server &_server;
-  size_t _count;
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 static bool handshake_websocket(connection &conn);
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-//---------------------------------------------------------------------------------------------------------------------
-static std::string trim(const std::string &str)
-{
-  size_t trimLeft = 0, trimRight = str.length() - 1;
-
-  while (trimLeft < str.length() && isspace(str[trimLeft]))
-    ++trimLeft;
-
-  while (trimRight < str.length() && isspace(str[trimRight]))
-    --trimRight;
-
-  return (trimRight >= str.length() || trimLeft >= str.length() || trimRight < trimLeft)
-    ? std::string("")
-    : str.substr(trimLeft, trimRight - trimLeft + 1);
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-static std::string cut_front(std::string &str, char delimiter = ' ')
-{
-  std::string result;
-
-  auto pos = str.find(delimiter);
-  if (pos == std::string::npos)
-  {
-    result = str;
-    str = "";
-  }
-  else
-  {
-    result = str.substr(0, pos);
-    str = str.substr(pos + 1);
-  }
-
-  return result;
-}
 
 }
 
@@ -227,7 +132,7 @@ protected:
   std::unique_ptr<detail::basic_tcp_server_impl> _p;
 
 private:
-  template <typename T> friend class detail::enumerator;
+  template <typename T> friend class tcp_server;
 
   void remove_disconnected() const;
 
@@ -265,7 +170,56 @@ public:
     base_t::stop();
   }
 
-  detail::enumerator<T> clients() const { return detail::enumerator<T>(*this); }
+  class enumerator
+  {
+  public:
+    explicit enumerator(const tcp_server &server)
+      : _server(server)
+      , _count(server.acquire_clients())
+    {
+
+    }
+
+    ~enumerator()
+    {
+      _server.release_clients();
+    }
+
+    const tcp_server &server() const { return _server; }
+    size_t size() const { return _count; }
+
+    struct iterator
+    {
+      enumerator &e;
+      size_t index;
+
+      iterator(enumerator &enu, size_t idx)
+        : e(enu)
+        , index(idx)
+      {
+
+      }
+
+      bool operator==(const iterator &iter) const { return iter.index == index && &iter.e == &e; }
+      bool operator!=(const iterator &iter) const { return iter.index != index || &iter.e != &e; }
+      ptr<T> operator*() const { return std::dynamic_pointer_cast<T>(e.server().client_at(index)); }
+
+      iterator &operator++()
+      {
+        ++index;
+        return *this;
+      }
+    };
+
+    iterator begin() { return iterator(*this, 0); }
+    iterator end() { return iterator(*this, _count); }
+
+  private:
+    const tcp_server &_server;
+    size_t _count;
+  };
+
+  enumerator clients() const { return enumerator(*this); }
 
 protected:
   bool handshake(connection &conn) override { return true; }
@@ -551,35 +505,21 @@ private:
 
 namespace headsocket {
 
-#if defined(HEADSOCKET_PLATFORM_WINDOWS)
 namespace detail {
-
+#if defined(HEADSOCKET_PLATFORM_WINDOWS)
 typedef SOCKET socket_type;
 static const int socket_error = SOCKET_ERROR;
 static const SOCKET invalid_socket = INVALID_SOCKET;
-
-void close_socket(socket_type s)
-{
-  closesocket(s);
-}
-
-}
+void close_socket(socket_type s) { closesocket(s); }
 #define HEADSOCKET_SPRINTF sprintf_s
 #elif defined(HEADSOCKET_PLATFORM_ANDROID) || defined(HEADSOCKET_PLATFORM_NIX)
-namespace detail {
-
 typedef int socket_type;
 static const int socket_error = -1;
 static const int invalid_socket = -1;
-
-void close_socket(socket_type s)
-{
-  close(s);
-}
-
-}
+void close_socket(socket_type s) { close(s); }
 #define HEADSOCKET_SPRINTF sprintf
 #endif
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -717,9 +657,9 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct encoding
+struct utils
 {
-  static std::string base64(const void *ptr, size_t length)
+  static std::string base64_encode(const void *ptr, size_t length)
   {
     static const char *encoding_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     static size_t mod_table[] = { 0, 2, 1 };
@@ -802,12 +742,7 @@ struct encoding
 
     return result.str();
   }
-};
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-struct endian
-{
   static uint16_t swap16bits(uint16_t x) { return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8); }
 
   static uint32_t swap32bits(uint32_t x)
@@ -821,6 +756,40 @@ struct endian
       ((x & 0x00000000000000FFULL) << 56) | ((x & 0x000000000000FF00ULL) << 40) | ((x & 0x0000000000FF0000ULL) << 24) |
       ((x & 0x00000000FF000000ULL) << 8) | ((x & 0x000000FF00000000ULL) >> 8) | ((x & 0x0000FF0000000000ULL) >> 24) |
       ((x & 0x00FF000000000000ULL) >> 40) | ((x & 0xFF00000000000000ULL) >> 56);
+  }
+
+  static std::string trim(const std::string &str)
+  {
+    size_t trimLeft = 0, trimRight = str.length() - 1;
+
+    while (trimLeft < str.length() && isspace(str[trimLeft]))
+      ++trimLeft;
+
+    while (trimRight < str.length() && isspace(str[trimRight]))
+      --trimRight;
+
+    return (trimRight >= str.length() || trimLeft >= str.length() || trimRight < trimLeft)
+      ? std::string("")
+      : str.substr(trimLeft, trimRight - trimLeft + 1);
+  }
+
+  static std::string cut_front(std::string &str, char delimiter = ' ')
+  {
+    std::string result;
+
+    auto pos = str.find(delimiter);
+    if (pos == std::string::npos)
+    {
+      result = str;
+      str = "";
+    }
+    else
+    {
+      result = str.substr(0, pos);
+      str = str.substr(pos + 1);
+    }
+
+    return result;
   }
 };
 
@@ -998,7 +967,7 @@ bool handshake_websocket(connection &conn)
   sha.process_bytes(key.c_str(), key.length());
 
   std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
-  response += detail::encoding::base64(sha.get_digest_bytes(digest), 20);
+  response += detail::utils::base64_encode(sha.get_digest_bytes(digest), 20);
   response += "\n\n";
 
   return conn.force_write(response.c_str(), response.length());
@@ -1283,10 +1252,12 @@ void basic_tcp_server::stop()
     detail::close_socket(_p->serverSocket);
 
     {
-      detail::enumerator<basic_tcp_client> e(*this);
+      acquire_clients();
 
-      for (auto client : e)
-        client->disconnect();
+      for (size_t i = 0, S = num_clients(); i < S; ++i)
+        client_at(i)->disconnect();
+
+      release_clients();
     }
 
     if (_p->acceptThread)
@@ -1960,7 +1931,7 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
     {
       data_block &db = _ap->readBlocks->blocks.back();
       size_t len = _current_header.payload_length;
-      detail::encoding::xor32(_current_header.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
+      detail::utils::xor32(_current_header.masking_key, _ap->readBlocks->buffer.data() + _ap->readBlocks->buffer.size() - len, len);
     }
 
     if (_current_header.fin)
@@ -2013,13 +1984,13 @@ size_t web_socket_client::frame_header::read(const uint8_t *ptr, size_t length)
   else if (byte == 126)
   {
     HAVE_ENOUGH_BYTES(2);
-    this->payload_length = detail::endian::swap16bits(*(reinterpret_cast<const uint16_t *>(cursor)));
+    this->payload_length = detail::utils::swap16bits(*(reinterpret_cast<const uint16_t *>(cursor)));
     cursor += 2;
   }
   else if (byte == 127)
   {
     HAVE_ENOUGH_BYTES(8);
-    uint64_t length64 = detail::endian::swap64bits(*(reinterpret_cast<const uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
+    uint64_t length64 = detail::utils::swap64bits(*(reinterpret_cast<const uint64_t *>(cursor))) & 0x7FFFFFFFFFFFFFFFULL;
     this->payload_length = static_cast<size_t>(length64);
     cursor += 8;
   }
@@ -2050,14 +2021,14 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
   {
     HAVE_ENOUGH_BYTES(2);
     *cursor++ |= 126;
-    *reinterpret_cast<uint16_t *>(cursor) = detail::endian::swap16bits(static_cast<uint16_t>(this->payload_length));
+    *reinterpret_cast<uint16_t *>(cursor) = detail::utils::swap16bits(static_cast<uint16_t>(this->payload_length));
     cursor += 2;
   }
   else
   {
     HAVE_ENOUGH_BYTES(8);
     *cursor++ |= 127;
-    *reinterpret_cast<uint64_t *>(cursor) = detail::endian::swap64bits(static_cast<uint64_t>(this->payload_length));
+    *reinterpret_cast<uint64_t *>(cursor) = detail::utils::swap64bits(static_cast<uint64_t>(this->payload_length));
     cursor += 8;
   }
 
@@ -2093,9 +2064,9 @@ bool http_server::handshake(connection &conn)
   std::cout << requestLine << std::endl;
 #endif
 
-  std::string method = detail::cut_front(requestLine);
-  std::string path = detail::encoding::url_decode(detail::cut_front(requestLine));
-  std::string version = detail::cut_front(requestLine);
+  std::string method = detail::utils::cut_front(requestLine);
+  std::string path = detail::utils::url_decode(detail::utils::cut_front(requestLine));
+  std::string version = detail::utils::cut_front(requestLine);
 
   response resp;
   if (path != "/favicon.ico" && request(path, resp))
