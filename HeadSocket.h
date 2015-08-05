@@ -276,7 +276,7 @@ protected:
 
   friend class basic_tcp_server;
 
-  basic_tcp_client(const char *address, int port);
+  basic_tcp_client(const std::string &address, int port);
   basic_tcp_client(ptr<basic_tcp_server> server, connection &conn);
 
   std::unique_ptr<detail::basic_tcp_client_impl> _p;
@@ -285,21 +285,21 @@ protected:
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define __HEADSOCKET_CLIENT_STATIC_CTORS(className) \
-  className(const protected_tag &, const char *address, int port): className(address, port) { } \
+  className(const protected_tag &, const std::string &address, int port): className(address, port) { } \
   className(const protected_tag &, headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn): className(server, conn) { } \
-  static headsocket::ptr<className> create(const char *address, int port) { return std::make_shared<className>(protected_tag{}, address, port); } \
+  static headsocket::ptr<className> create(const std::string &address, int port) { return std::make_shared<className>(protected_tag{}, address, port); } \
   static headsocket::ptr<className> create(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn) { return std::make_shared<className>(protected_tag{}, server, conn); }
 
 #define HEADSOCKET_CLIENT_BASE(className) \
   protected: \
-    className(const char *address, int port); \
+    className(const std::string &address, int port); \
     className(ptr<basic_tcp_server> server, connection &conn); \
   public: \
     __HEADSOCKET_CLIENT_STATIC_CTORS(className)
 
 #define HEADSOCKET_CLIENT(className, baseClassName) \
   protected: \
-    className(const char *address, int port): baseClassName(address, port) { } \
+    className(const std::string &address, int port): baseClassName(address, port) { } \
     className(headsocket::ptr<headsocket::basic_tcp_server> server, headsocket::connection &conn): baseClassName(server, conn) { } \
   public: \
     __HEADSOCKET_CLIENT_STATIC_CTORS(className)
@@ -1392,7 +1392,7 @@ struct basic_tcp_client_impl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-basic_tcp_client::basic_tcp_client(const char *address, int port)
+basic_tcp_client::basic_tcp_client(const std::string &address, int port)
   : _p(new detail::basic_tcp_client_impl())
 {
   struct addrinfo *result = nullptr, *ptr = nullptr, hints;
@@ -1405,7 +1405,7 @@ basic_tcp_client::basic_tcp_client(const char *address, int port)
   char buff[16];
   HEADSOCKET_SPRINTF(buff, "%d", port);
 
-  if (getaddrinfo(address, buff, &hints, &result))
+  if (getaddrinfo(address.c_str(), buff, &hints, &result))
     return;
 
   for (ptr = result; ptr != nullptr; ptr = ptr->ai_next)
@@ -1480,7 +1480,7 @@ id_t basic_tcp_client::id() const { return _p->conn.id(); }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-tcp_client::tcp_client(const char *address, int port)
+tcp_client::tcp_client(const std::string &address, int port)
   : base_t(address, port)
 {
 
@@ -1532,7 +1532,7 @@ struct async_tcp_client_impl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-async_tcp_client::async_tcp_client(const char *address, int port)
+async_tcp_client::async_tcp_client(const std::string &address, int port)
   : base_t(address, port)
   , _ap(new detail::async_tcp_client_impl())
 {
@@ -1734,7 +1734,7 @@ void async_tcp_client::kill_threads()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //---------------------------------------------------------------------------------------------------------------------
-web_socket_client::web_socket_client(const char *address, int port)
+web_socket_client::web_socket_client(const std::string &address, int port)
   : base_t(address, port)
 {
 
