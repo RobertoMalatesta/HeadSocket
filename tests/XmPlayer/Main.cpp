@@ -6,6 +6,23 @@
 
 #include "libxm/xm.h"
 
+static const char *xm_player_html =
+#include "XmPlayer.html.inl"
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class http_server : public headsocket::http_server
+{
+  HEADSOCKET_SERVER(http_server, headsocket::http_server);
+
+public:
+  bool request(const std::string &path, response &resp) override
+  {
+    resp.message = xm_player_html;
+    return true;
+  }
+};
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class client : public headsocket::web_socket_client
@@ -85,16 +102,19 @@ private:
 
 int main(int argc, char *argv[])
 {
-  int port = 42667;
+  auto http = http_server::create(8080);
+  if (http->is_running())
+    std::cout << "HTTP server is running, open http://localhost:" << http->port() << " and dance!" << std::endl;
+  else
+    std::cout << "Could not start HTTP server!" << std::endl;
 
-  typedef headsocket::web_socket_server<client> server_t;
-  auto server = server_t::create(port);
-
+  auto server = headsocket::web_socket_server<client>::create(42667);
   if (server->is_running())
-    std::cout << "XM module server is running at port " << port << std::endl;
+    std::cout << "XM module server is running at port " << server->port() << std::endl;
   else
     std::cout << "Could not start server!" << std::endl;
 
+  std::cout << "Press ENTER to quit" << std::endl;
   std::getchar();
   return 0;
 }

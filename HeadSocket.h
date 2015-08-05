@@ -126,7 +126,7 @@ static std::string trim(const std::string &str)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-static std::string cut(std::string &str, char delimiter = ' ')
+static std::string cut_front(std::string &str, char delimiter = ' ')
 {
   std::string result;
 
@@ -207,6 +207,7 @@ struct data_block
 class basic_tcp_server : public std::enable_shared_from_this<basic_tcp_server>
 {
 public:
+  int port() const;
   void stop();
   bool is_running() const;
   bool disconnect(ptr<basic_tcp_client> client);
@@ -452,6 +453,35 @@ protected:
 
 private:
   enum { needs_web_socket_client = T::is_web_socket_client };
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class http_server : public tcp_server<tcp_client>
+{
+  HEADSOCKET_SERVER(http_server, tcp_server<tcp_client>);
+
+public:
+  ~http_server()
+  {
+    stop();
+  }
+
+  struct response
+  {
+    std::string content_type = "text/html";
+    std::string message = "";
+  };
+
+protected:
+  virtual bool request(const std::string &path, response &resp) { return false; }
+
+private:
+  bool handshake(connection &conn) final override;
+
+  ptr<basic_tcp_client> accept(connection &conn) final override { return nullptr; }
+  void client_connected(client_ptr client) final override { }
+  void client_disconnected(client_ptr client) final override { }
 };
 
 }
@@ -1241,6 +1271,9 @@ basic_tcp_server::~basic_tcp_server()
   WSACleanup();
 #endif
 }
+
+//---------------------------------------------------------------------------------------------------------------------
+int basic_tcp_server::port() const { return _p->port; }
 
 //---------------------------------------------------------------------------------------------------------------------
 void basic_tcp_server::stop()
@@ -2038,6 +2071,51 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
   return cursor - ptr;
 }
 #undef HAVE_ENOUGH_BYTES
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------------------------------------------------------------------------------------------------------------
+bool http_server::handshake(connection &conn)
+{
+  std::string requestLine;
+
+  if (!conn.read_line(requestLine))
+    return false;
+
+  std::string headerLine;
+  while (conn.read_line(headerLine))
+  {
+    if (headerLine.empty())
+      break;
+  }
+
+#if defined(_DEBUG)
+  std::cout << requestLine << std::endl;
+#endif
+
+  std::string method = detail::cut_front(requestLine);
+  std::string path = detail::encoding::url_decode(detail::cut_front(requestLine));
+  std::string version = detail::cut_front(requestLine);
+
+  response resp;
+  if (path != "/favicon.ico" && request(path, resp))
+  {
+    std::stringstream ss;
+    ss << version << " 200 OK\n";
+    ss << "Content-Type: " << resp.content_type << "\n";
+    ss << "Content-Length: " << resp.message.length() << "\n\n";
+    ss << resp.message;
+
+    conn.write(ss.str());
+  }
+  else
+  {
+    conn.write(version);
+    conn.write(" 404 Not Found\n");
+  }
+
+  return false;
+}
 
 }
 #endif

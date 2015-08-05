@@ -1,4 +1,34 @@
 -----------------------------------------------------------------------------------------------------------------------
+function readFile(fileName)
+
+  local f = io.open(fileName, "rb")
+  local content = f:read("*all")
+  f:close()
+  
+  return content
+  
+end
+
+-----------------------------------------------------------------------------------------------------------------------
+function writeFile(fileName, content)
+
+  local f = io.open(fileName, "wb")
+  f:write(content)
+  f:close()
+  
+end
+
+-----------------------------------------------------------------------------------------------------------------------
+function generateStringSource(fileName)
+
+  print("Generating string source: " .. fileName)
+
+  local content = "R\"H34D50CK3T(" .. readFile(fileName) .. ")H34D50CK3T\";"
+  writeFile(fileName .. ".inl", content)  
+
+end
+
+-----------------------------------------------------------------------------------------------------------------------
 function printTable(t)
 
 	for k, v in pairs(t) do

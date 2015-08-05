@@ -1,5 +1,7 @@
 project("XmPlayer")
 
+generateStringSource("XmPlayer.html")
+
 generateProject(
 {
   type = "console",

@@ -1,0 +1,92 @@
+R"H34D50CK3T(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>XM Player example</title>
+  <style>
+    body {
+      background-color: #808080;
+      font: 13px monospace;
+      color: #FFFFFF;
+    }
+  </style>
+</head>
+<body>
+  <div id="content"></div>
+</body>
+</html>
+
+<script language="javascript" type="text/javascript">
+  var content = document.getElementById("content");
+  var uri = "ws://localhost:42667";
+  var bufferSize = 4096;
+  var sampleBuffer = [];
+  var ws;
+  var audioContext;
+  var audioProcessor;
+  var audioSource;
+  var totalSamplesStreamed = 0;
+
+  function rgb2hex(r, g, b) {
+    if (g !== undefined) 
+      return Number(0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).substring(1);
+    else 
+      return Number(0x1000000 + r[0] * 0x10000 + r[1] * 0x100 + r[2]).toString(16).substring(1);
+  }
+  
+  function renderAudio(e) {
+    var outputBuffer = event.outputBuffer;
+    var L = outputBuffer.getChannelData(0);
+    var R = outputBuffer.getChannelData(1);
+    
+    var j = 0;
+    for (var i = 0; i < outputBuffer.length; j += 2) {
+      L[i] = sampleBuffer[j];
+      R[i++] = sampleBuffer[j + 1];
+      L[i] = sampleBuffer[j];
+      R[i++] = sampleBuffer[j + 1];
+    }
+    
+    sampleBuffer = sampleBuffer.slice(j);
+    
+    var newSamples = 4 * bufferSize - sampleBuffer;
+    if (newSamples > 0 && ws.readyState == 1)
+      ws.send(newSamples);
+  }
+  
+  function onOpen(e) {
+    ws.send(audioContext.sampleRate);
+  }
+  
+  function onClose(e) {
+    content.innerHTML = "Disconnected...";
+  }
+
+  function onMessage(e) {
+    var int8s = new Int8Array(e.data);
+    var samples = int8s.length;
+    
+    for (var i = 0; i < samples; ++i)
+      sampleBuffer.push(int8s[i] / 127.0);
+      
+    totalSamplesStreamed += samples / 2;
+    content.innerHTML = "Streaming XM music from: " + uri + "<br />";
+    content.innerHTML += "Number of stereo samples streamed: " + totalSamplesStreamed.toString();
+  }
+
+  function main() {
+    audioContext = new AudioContext();
+    audioProcessor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+    audioProcessor.onaudioprocess = function (e) { renderAudio(e); }
+    audioProcessor.connect(audioContext.destination);
+    
+    ws = new WebSocket(uri);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = function (e) { onOpen(e); }
+    ws.onclose = function (e) { onClose(e); }
+    ws.onmessage = function (e) { onMessage(e); }
+  }
+
+  window.addEventListener("load", main, false);
+</script>
+)H34D50CK3T";
