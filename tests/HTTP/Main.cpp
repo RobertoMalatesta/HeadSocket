@@ -29,20 +29,22 @@ public:
     std::string content_type = "text/html";
     std::string message = "";
   };
-  
+
 protected:
   virtual bool request(const std::string &path, response &resp)
   {
+    resp.message = "Hello!";
     return true;
   }
 
+private:
   bool handshake(connection &conn) final override
   {
     std::string requestLine;
-    
+
     if (!conn.read_line(requestLine))
       return false;
-    
+
     std::string headerLine;
     while (conn.read_line(headerLine))
     {
@@ -50,33 +52,37 @@ protected:
         break;
     }
 
+    std::cout << requestLine << std::endl;
+
     std::string method = detail::cut(requestLine);
-    std::string path = detail::cut(requestLine);
+    std::string path = detail::encoding::url_decode(detail::cut(requestLine));
+    std::string version = detail::cut(requestLine);
+
+    std::cout << path << std::endl;
 
     response resp;
-    if (request(path, resp))
+    if (path != "/favicon.ico" && request(path, resp))
     {
       std::stringstream ss;
-      ss << "HTTP/1.0 200 OK\n";
+      ss << version << " 200 OK\n";
+      ss << "Content-Type: " << resp.content_type << "\n";
+      ss << "Content-Length: " << resp.message.length() << "\n\n";
+      ss << resp.message;
 
       conn.write(ss.str());
     }
     else
-      conn.write("HTTP/1.0 404 Not Found\n");
+    {
+      conn.write(version);
+      conn.write(" 404 Not Found\n");
+    }
 
     return false;
   }
 
-  ptr<basic_tcp_client> accept(connection &conn) final override
-  {
-    return nullptr;
-  }
-
+  ptr<basic_tcp_client> accept(connection &conn) final override { return nullptr; }
   void client_connected(client_ptr client) final override { }
   void client_disconnected(client_ptr client) final override { }
-
-private:
-
 };
 
 }

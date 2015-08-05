@@ -14,6 +14,7 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 - no TLS, secured connections are not supported and probably never will be supported
 - the API might *(and probably will)* change in the future
 - you can use this as a simple TCP network library as well
+- there is a primitive HTTP server class you might want to use as well
 - WebSocket frame continuation is supported *(and automatically resolved for you)*
 - performance is not great *(but should be enough in most cases)*
 - UTF-8? Unicode? What?!
@@ -224,6 +225,13 @@ Public interface provides this extra method:
 ### `web_socket_server<T>`
 Extended implementation of `tcp_server<T>`, where `<T>` **must** be derived from `web_socket_client`. The only difference between this and `tcp_server<T>` is additional handling of WebSocket handshake. Rest of the behavior is handled by `tcp_server<T>` itself.
 
+
+----------
+
+### `http_server`
+Extended implementation of `tcp_server<tcp_client>` with slightly altered behavior, providing **VERY NAIVE** HTTP server functionality. You can no longer use regular `basic_tcp_server` callbacks (`handshake`, `accept`, etc.), because `http_server` does not require any clients. The connections are not persistent, so every request is followed by a response and then the socket is closed. You are only required to implement your own `request` handler:
+
+- `bool` **`request(const std::string &path, response &resp)`**: *TODO*
 
 ----------
 

@@ -466,6 +466,7 @@ private:
 
 #include <thread>
 #include <atomic>
+#include <iomanip>
 #include <vector>
 #include <mutex>
 #include <condition_variable>
@@ -724,6 +725,52 @@ struct encoding
       *data = (*data) ^ mask[i % 4];
 
     return length;
+  }
+
+  static std::string url_encode(const std::string &str)
+  {
+    std::ostringstream result;
+    result.fill('0');
+    result << std::hex;
+
+    for (std::string::const_iterator i = str.begin(), n = str.end(); i != n; ++i)
+    {
+      auto c = (*i);
+
+      if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+        result << c;
+      else
+        result << '%' << std::setw(2) << static_cast<int>(c);
+    }
+
+    return result.str();
+  }
+
+  static std::string url_decode(const std::string &str)
+  {
+    std::ostringstream result;
+
+    for (size_t i = 0, S = str.length(); i < S; ++i)
+    {
+      auto c = str[i];
+
+      if (c == '%')
+      {
+        char hexBuff[3] = { 0, 0, 0 };
+        hexBuff[0] = str[++i];
+        hexBuff[1] = str[++i];
+
+        int value;
+        sscanf(hexBuff, "%x", &value);
+        result << static_cast<char>(value);
+      }
+      else if (c == '+')
+        result << ' ';
+      else
+        result << c;
+    }
+
+    return result.str();
   }
 };
 
