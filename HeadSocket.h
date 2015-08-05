@@ -34,9 +34,6 @@ class async_tcp_client;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <typename T> using ptr = std::shared_ptr<T>;
-template <typename T> using weak_ptr = std::weak_ptr<T>;
-template <typename T> using unique_ptr = std::unique_ptr<T>;
-
 typedef size_t id_t;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -134,7 +131,7 @@ public:
   bool read_line(std::string &output);
 
 private:
-  unique_ptr<detail::connection_impl> _p;
+  std::unique_ptr<detail::connection_impl> _p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -187,7 +184,7 @@ protected:
   virtual void client_connected(ptr<basic_tcp_client> client) = 0;
   virtual void client_disconnected(ptr<basic_tcp_client> client) = 0;
 
-  unique_ptr<detail::basic_tcp_server_impl> _p;
+  std::unique_ptr<detail::basic_tcp_server_impl> _p;
 
 private:
   template <typename T> friend class detail::enumerator;
@@ -282,7 +279,7 @@ protected:
   basic_tcp_client(const char *address, int port);
   basic_tcp_client(ptr<basic_tcp_server> server, connection &conn);
 
-  unique_ptr<detail::basic_tcp_client_impl> _p;
+  std::unique_ptr<detail::basic_tcp_client_impl> _p;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -354,7 +351,7 @@ protected:
 
   void kill_threads();
 
-  unique_ptr<detail::async_tcp_client_impl> _ap;
+  std::unique_ptr<detail::async_tcp_client_impl> _ap;
 
 private:
   void write_thread();
@@ -1107,8 +1104,8 @@ struct basic_tcp_server_impl
   detail::semaphore disconnectSemaphore;
   int port = 0;
   detail::socket_type serverSocket = invalid_socket;
-  unique_ptr<std::thread> acceptThread;
-  unique_ptr<std::thread> disconnectThread;
+  std::unique_ptr<std::thread> acceptThread;
+  std::unique_ptr<std::thread> disconnectThread;
   id_t nextClientID = 1;
 
   basic_tcp_server_impl()
@@ -1378,7 +1375,7 @@ struct basic_tcp_client_impl
 {
   std::atomic_int refCount;
   std::atomic_bool isConnected;
-  weak_ptr<basic_tcp_server> server;
+  std::weak_ptr<basic_tcp_server> server;
   connection conn = detail::connection_impl();
   std::string address = "";
   int port = 0;
@@ -1526,8 +1523,8 @@ struct async_tcp_client_impl
   detail::semaphore writeSemaphore;
   detail::lockable_value<detail::data_block_buffer> writeBlocks;
   detail::lockable_value<detail::data_block_buffer> readBlocks;
-  unique_ptr<std::thread> writeThread;
-  unique_ptr<std::thread> readThread;
+  std::unique_ptr<std::thread> writeThread;
+  std::unique_ptr<std::thread> readThread;
 };
 
 }
