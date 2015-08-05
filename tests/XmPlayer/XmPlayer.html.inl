@@ -17,8 +17,10 @@ R"H34D50CK3T(<!DOCTYPE html>
 </html>
 
 <script language="javascript" type="text/javascript">
+  console.log(window.location.href);
+
   var content = document.getElementById("content");
-  var uri = "ws://localhost:42667";
+  var port = 42667;
   var bufferSize = 4096;
   var sampleBuffer = [];
   var ws;
@@ -27,6 +29,15 @@ R"H34D50CK3T(<!DOCTYPE html>
   var audioSource;
   var totalSamplesStreamed = 0;
 
+  var uri = "ws://localhost";
+  if (window.location.href.startsWith("http"))
+  {
+    var arr = window.location.href.split("/");
+    uri = "ws://" + arr[2].split(":")[0];
+  }
+  
+  uri += ":" + port.toString();
+  
   function rgb2hex(r, g, b) {
     if (g !== undefined) 
       return Number(0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).substring(1);
