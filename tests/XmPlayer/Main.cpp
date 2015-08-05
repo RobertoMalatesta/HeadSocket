@@ -11,9 +11,9 @@ static const char *xm_player_html =
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class http_server : public headsocket::http_server
+class http : public headsocket::http_server
 {
-  HEADSOCKET_SERVER(http_server, headsocket::http_server);
+  HEADSOCKET_SERVER(http, headsocket::http_server);
 
 public:
   bool request(const std::string &path, response &resp) override
@@ -102,9 +102,9 @@ private:
 
 int main(int argc, char *argv[])
 {
-  auto http = http_server::create(8080);
-  if (http->is_running())
-    std::cout << "HTTP server is running, open http://localhost:" << http->port() << " and dance!" << std::endl;
+  auto host = http::create(8080);
+  if (host->is_running())
+    std::cout << "HTTP server is running, open http://localhost:" << host->port() << " and dance!" << std::endl;
   else
     std::cout << "Could not start HTTP server!" << std::endl;
 
