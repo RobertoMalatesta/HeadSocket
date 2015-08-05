@@ -32,6 +32,7 @@ filter { "system:windows" }
 filter { }
   includedirs { "." }
   targetdir "bin/%{cfg.buildcfg}"
+  flags { "StaticRuntime" }
   
 group "tests"
   include "tests"
