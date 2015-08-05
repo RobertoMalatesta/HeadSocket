@@ -66,15 +66,9 @@ public:
     _server.release_clients();
   }
 
-  const basic_tcp_server &server() const
-  {
-    return _server;
-  }
+  const basic_tcp_server &server() const { return _server; }
 
-  size_t size() const
-  {
-    return _count;
-  }
+  size_t size() const { return _count; }
 
   struct iterator
   {
@@ -88,37 +82,22 @@ public:
 
     }
 
-    bool operator==(const iterator &iter) const
-    {
-      return iter.index == index && iter.e == e;
-    }
+    bool operator==(const iterator &iter) const { return iter.index == index && iter.e == e; }
 
-    bool operator!=(const iterator &iter) const
-    {
-      return iter.index != index || iter.e != e;
-    }
+    bool operator!=(const iterator &iter) const { return iter.index != index || iter.e != e; }
+
+    ptr<T> operator*() const { return std::dynamic_pointer_cast<T>(e->server().client_at(index)); }
 
     iterator &operator++()
     {
       ++index;
       return *this;
     }
-
-    ptr<T> operator*() const
-    {
-      return std::dynamic_pointer_cast<T>(e->server().client_at(index));
-    }
   };
 
-  iterator begin()
-  {
-    return iterator(this, 0);
-  }
+  iterator begin() { return iterator(this, 0); }
 
-  iterator end()
-  {
-    return iterator(this, _count);
-  }
+  iterator end() { return iterator(this, _count); }
 
 private:
   enum { needs_basic_tcp_client = T::is_basic_tcp_client };
@@ -129,7 +108,7 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static bool websocket_handshake(connection &conn);
+static bool handshake_websocket(connection &conn);
 
 }
 
@@ -249,26 +228,14 @@ public:
     base_t::stop();
   }
 
-  detail::enumerator<T> clients() const
-  {
-    return detail::enumerator<T>(*this);
-  }
+  detail::enumerator<T> clients() const { return detail::enumerator<T>(*this); }
 
 protected:
-  bool handshake(connection &conn) override
-  {
-    return true;
-  }
+  bool handshake(connection &conn) override { return true; }
 
-  virtual void client_connected(client_ptr client)
-  {
+  virtual void client_connected(client_ptr client) { }
 
-  }
-
-  virtual void client_disconnected(client_ptr client)
-  {
-
-  }
+  virtual void client_disconnected(client_ptr client) { }
 
 private:
   enum { needs_basic_tcp_client = T::is_basic_tcp_client };
@@ -381,10 +348,7 @@ protected:
   virtual size_t async_write_handler(uint8_t *ptr, size_t length);
   virtual size_t async_read_handler(uint8_t *ptr, size_t length);
 
-  virtual bool async_received_data(const data_block &db, uint8_t *ptr, size_t length)
-  {
-    return false;
-  }
+  virtual bool async_received_data(const data_block &db, uint8_t *ptr, size_t length) { return false; }
 
   virtual void push(const void *ptr, size_t length, opcode opcode);
 
@@ -448,10 +412,7 @@ public:
   }
 
 protected:
-  bool handshake(connection &conn) override
-  {
-    return detail::websocket_handshake(conn);
-  }
+  bool handshake(connection &conn) override { return detail::handshake_websocket(conn); }
 
 private:
   enum { needs_web_socket_client = T::is_web_socket_client };
@@ -563,10 +524,7 @@ public:
   typedef uint32_t digest32_t[5];
   typedef uint8_t digest8_t[20];
 
-  inline static uint32_t rotate_left(uint32_t value, size_t count)
-  {
-    return (value << count) ^ (value >> (32 - count));
-  }
+  inline static uint32_t rotate_left(uint32_t value, size_t count) { return (value << count) ^ (value >> (32 - count)); }
 
   sha1()
   {
@@ -737,10 +695,7 @@ struct encoding
 
 struct endian
 {
-  static uint16_t swap16bits(uint16_t x)
-  {
-    return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8);
-  }
+  static uint16_t swap16bits(uint16_t x) { return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8); }
 
   static uint32_t swap32bits(uint32_t x)
   {
@@ -767,15 +722,8 @@ struct critical_section
     consumer_lock = false;
   }
 
-  void lock() const
-  {
-    while (consumer_lock.exchange(true));
-  }
-
-  void unlock() const
-  {
-    consumer_lock = false;
-  }
+  void lock() const { while (consumer_lock.exchange(true)); }
+  void unlock() const { consumer_lock = false; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -808,10 +756,12 @@ struct semaphore
     cv.wait(lock, [&]()->bool { return count > 0; });
     lock.release();
   }
+
   void unlock()
   {
     mutex.unlock();
   }
+
   void notify()
   {
     {
@@ -821,6 +771,7 @@ struct semaphore
 
     cv.notify_one();
   }
+
   void consume() const
   {
     if (count)
@@ -910,6 +861,38 @@ struct data_block_buffer
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//---------------------------------------------------------------------------------------------------------------------
+bool handshake_websocket(connection &conn)
+{
+  std::string line, key;
+
+  while (conn.read_line(line))
+  {
+    if (line.empty())
+      break;
+
+    if (!memcmp(line.c_str(), "Sec-WebSocket-Key: ", 19))
+      key = line.substr(19);
+  }
+
+  if (key.empty())
+    return false;
+
+  key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+  detail::sha1 sha;
+  detail::sha1::digest8_t digest;
+  sha.process_bytes(key.c_str(), key.length());
+
+  std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
+  response += detail::encoding::base64(sha.get_digest_bytes(digest), 20);
+  response += "\n\n";
+
+  return conn.force_write(response.c_str(), response.length());
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #ifdef HEADSOCKET_PLATFORM_WINDOWS
 void set_thread_name(const char *name)
 {
@@ -941,47 +924,6 @@ void set_thread_name(const char *name)
 #endif
 
 } // namespace detail;
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-struct ConnectionParams
-{
-  detail::socket_type clientSocket;
-  sockaddr_in from;
-  size_t id;
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-//---------------------------------------------------------------------------------------------------------------------
-bool detail::websocket_handshake(connection &conn)
-{
-  std::string line, key;
-
-  while (conn.read_line(line))
-  {
-    if (line.empty())
-      break;
-
-    if (!memcmp(line.c_str(), "Sec-WebSocket-Key: ", 19))
-      key = line.substr(19);
-  }
-
-  if (key.empty())
-    return false;
-
-  key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-  detail::sha1 sha;
-  detail::sha1::digest8_t digest;
-  sha.process_bytes(key.c_str(), key.length());
-
-  std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
-  response += detail::encoding::base64(sha.get_digest_bytes(digest), 20);
-  response += "\n\n";
-
-  return conn.force_write(response.c_str(), response.length());
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1026,16 +968,10 @@ connection::~connection()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool connection::is_valid() const
-{
-  return _p->socket != detail::invalid_socket;
-}
+bool connection::is_valid() const { return _p->socket != detail::invalid_socket; }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t connection::id() const
-{
-  return _p->id;
-}
+size_t connection::id() const { return _p->id; }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t connection::write(const void *ptr, size_t length)
@@ -1255,10 +1191,7 @@ void basic_tcp_server::stop()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool basic_tcp_server::is_running() const
-{
-  return _p->isRunning;
-}
+bool basic_tcp_server::is_running() const { return _p->isRunning; }
 
 //---------------------------------------------------------------------------------------------------------------------
 bool basic_tcp_server::disconnect(ptr<basic_tcp_client> client)
@@ -1539,22 +1472,13 @@ bool basic_tcp_client::disconnect()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool basic_tcp_client::is_connected() const
-{
-  return _p->isConnected;
-}
+bool basic_tcp_client::is_connected() const { return _p->isConnected; }
 
 //---------------------------------------------------------------------------------------------------------------------
-ptr<basic_tcp_server> basic_tcp_client::server() const
-{
-  return _p->server.lock();
-}
+ptr<basic_tcp_server> basic_tcp_client::server() const { return _p->server.lock(); }
 
 //---------------------------------------------------------------------------------------------------------------------
-id_t basic_tcp_client::id() const
-{
-  return _p->conn.id();
-}
+id_t basic_tcp_client::id() const { return _p->conn.id(); }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1579,34 +1503,19 @@ tcp_client::~tcp_client()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t tcp_client::write(const void *ptr, size_t length)
-{
-  return _p->conn.write(ptr, length);
-}
+size_t tcp_client::write(const void *ptr, size_t length) { return _p->conn.write(ptr, length); }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool tcp_client::force_write(const void *ptr, size_t length)
-{
-  return _p->conn.force_write(ptr, length);
-}
+size_t tcp_client::read(void *ptr, size_t length) { return _p->conn.read(ptr, length); }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t tcp_client::read(void *ptr, size_t length)
-{
-  return _p->conn.read(ptr, length);
-}
+bool tcp_client::force_write(const void *ptr, size_t length) { return _p->conn.force_write(ptr, length); }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool tcp_client::force_read(void *ptr, size_t length)
-{
-  return _p->conn.force_read(ptr, length);
-}
+bool tcp_client::force_read(void *ptr, size_t length) { return _p->conn.force_read(ptr, length); }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool tcp_client::read_line(std::string &output)
-{
-  return _p->conn.read_line(output);
-}
+bool tcp_client::read_line(std::string &output) { return _p->conn.read_line(output); }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
