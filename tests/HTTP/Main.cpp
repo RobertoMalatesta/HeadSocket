@@ -37,13 +37,14 @@ protected:
 
   bool handshake(connection &conn) final override
   {
-    char lineBuffer[1024];
-    while (true)
-    {
-      size_t result = conn.read_line(lineBuffer, 1024);
-      if (result <= 1) break;
+    std::string line;
 
-      printf("%s\n", lineBuffer);
+    while (conn.read_line(line))
+    {
+      if (line.empty())
+        break;
+
+      printf("%s\n", line.c_str());
     }
 
     return false;

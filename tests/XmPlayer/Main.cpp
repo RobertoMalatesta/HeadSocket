@@ -8,12 +8,12 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class Client : public headsocket::web_socket_client
+class client : public headsocket::web_socket_client
 {
-  HEADSOCKET_CLIENT(Client, headsocket::web_socket_client);
+  HEADSOCKET_CLIENT(client, headsocket::web_socket_client);
 
 public:
-  virtual ~Client()
+  virtual ~client()
   {
     if (_xmContext)
       xm_free_context(_xmContext);
@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
 {
   int port = 42667;
 
-  typedef headsocket::web_socket_server<Client> server_t;
+  typedef headsocket::web_socket_server<client> server_t;
   auto server = server_t::create(port);
 
   if (server->is_running())

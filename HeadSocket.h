@@ -18,6 +18,7 @@ Usage:
 #define __HEADSOCKET_H__
 
 #include <memory>
+#include <string>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -47,10 +48,6 @@ struct connection_impl;
 struct basic_tcp_server_impl;
 struct basic_tcp_client_impl;
 struct async_tcp_client_impl;
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-static const size_t line_buffer_size = 1024;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -153,8 +150,9 @@ public:
   size_t read(void *ptr, size_t length);
 
   bool force_write(const void *ptr, size_t length);
-  size_t read_line(void *ptr, size_t length);
   bool force_read(void *ptr, size_t length);
+
+  bool read_line(std::string &output);
 
 private:
   unique_ptr<detail::connection_impl> _p;
@@ -356,8 +354,9 @@ public:
   virtual size_t read(void *ptr, size_t length);
 
   bool force_write(const void *ptr, size_t length);
-  size_t read_line(void *ptr, size_t length);
   bool force_read(void *ptr, size_t length);
+
+  bool read_line(std::string &output);
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -695,32 +694,28 @@ private:
 
 struct encoding
 {
-  static size_t base64(const void *src, size_t src_length, void *dst, size_t dst_length)
+  static std::string base64(const void *ptr, size_t length)
   {
-    if (!src || !src_length || !dst || !dst_length)
-      return 0;
-
     static const char *encoding_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    static size_t mod_table[] = { 0, 2, 1 }, result = 4 * ((src_length + 2) / 3);
+    static size_t mod_table[] = { 0, 2, 1 };
 
-    if (result <= dst_length - 1)
+    std::string result(4 * ((length + 2) / 3), '=');
+
+    if (ptr && length)
     {
-      const uint8_t *input = reinterpret_cast<const uint8_t *>(src);
-      uint8_t *output = reinterpret_cast<uint8_t *>(dst);
+      const uint8_t *input = reinterpret_cast<const uint8_t *>(ptr);
 
-      for (size_t i = 0, j = 0, triplet = 0; i < src_length; triplet = 0)
+      for (size_t i = 0, j = 0, triplet = 0; i < length; triplet = 0)
       {
         for (size_t k = 0; k < 3; ++k)
-          triplet = (triplet << 8) | (i < src_length ? static_cast<uint8_t>(input[i++]) : 0);
+          triplet = (triplet << 8) | (i < length ? static_cast<uint8_t>(input[i++]) : 0);
 
         for (size_t k = 4; k--;)
-          output[j++] = encoding_table[(triplet >> k * 6) & 0x3F];
+          result[j++] = encoding_table[(triplet >> k * 6) & 0x3F];
       }
 
-      for (size_t i = 0; i < mod_table[src_length % 3]; i++)
-        output[result - 1 - i] = '=';
-
-      output[result] = 0;
+      for (size_t i = 0; i < mod_table[length % 3]; i++)
+        result[result.length() - 1 - i] = '=';
     }
 
     return result;
@@ -961,18 +956,15 @@ struct ConnectionParams
 //---------------------------------------------------------------------------------------------------------------------
 bool detail::websocket_handshake(connection &conn)
 {
-  std::string key;
-  char lineBuffer[detail::line_buffer_size];
+  std::string line, key;
 
-  while (true)
+  while (conn.read_line(line))
   {
-    size_t result = conn.read_line(lineBuffer, 256);
-
-    if (result <= 1)
+    if (line.empty())
       break;
 
-    if (!memcmp(lineBuffer, "Sec-WebSocket-Key: ", 19))
-      key = lineBuffer + 19;
+    if (!memcmp(line.c_str(), "Sec-WebSocket-Key: ", 19))
+      key = line.substr(19);
   }
 
   if (key.empty())
@@ -982,13 +974,10 @@ bool detail::websocket_handshake(connection &conn)
 
   detail::sha1 sha;
   detail::sha1::digest8_t digest;
-
   sha.process_bytes(key.c_str(), key.length());
-  sha.get_digest_bytes(digest);
-  detail::encoding::base64(digest, 20, lineBuffer, 256);
 
   std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
-  response += lineBuffer;
+  response += detail::encoding::base64(sha.get_digest_bytes(digest), 20);
   response += "\n\n";
 
   return conn.force_write(response.c_str(), response.length());
@@ -1108,37 +1097,6 @@ size_t connection::read(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t connection::read_line(void *ptr, size_t length)
-{
-  if (!is_valid())
-    return detail::socket_error;
-
-  if (!ptr || !length)
-    return 0;
-
-  size_t result = 0;
-
-  while (result < length - 1)
-  {
-    char ch;
-    int r = recv(_p->socket, &ch, 1, 0);
-
-    if (!r || r == detail::socket_error)
-      return 0;
-
-    if (r != 1 || ch == '\n')
-      break;
-
-    if (ch != '\r')
-      reinterpret_cast<char *>(ptr)[result++] = ch;
-  }
-
-  reinterpret_cast<char *>(ptr)[result++] = 0;
-
-  return result;
-}
-
-//---------------------------------------------------------------------------------------------------------------------
 bool connection::force_read(void *ptr, size_t length)
 {
   if (!is_valid())
@@ -1158,6 +1116,31 @@ bool connection::force_read(void *ptr, size_t length)
 
     length -= static_cast<size_t>(result);
     chPtr += result;
+  }
+
+  return true;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool connection::read_line(std::string &output)
+{
+  if (!is_valid())
+    return false;
+
+  output = "";
+
+  while (true)
+  {
+    char ch;
+    int r = recv(_p->socket, &ch, 1, 0);
+
+    if (!r || r == detail::socket_error)
+      return false;
+
+    if (ch == '\n')
+      break;
+    else if (ch != '\r')
+      output += ch;
   }
 
   return true;
@@ -1614,15 +1597,15 @@ size_t tcp_client::read(void *ptr, size_t length)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-size_t tcp_client::read_line(void *ptr, size_t length)
-{
-  return _p->conn.read_line(ptr, length);
-}
-
-//---------------------------------------------------------------------------------------------------------------------
 bool tcp_client::force_read(void *ptr, size_t length)
 {
   return _p->conn.force_read(ptr, length);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool tcp_client::read_line(std::string &output)
+{
+  return _p->conn.read_line(output);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
