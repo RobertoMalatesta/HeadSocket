@@ -230,26 +230,21 @@ private:
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define HEADSOCKET_SERVER(className, baseClassName) \
-  className(int port): baseClassName(port) { }
+  protected: \
+    explicit className(int port): baseClassName(port) { } \
+  public: \
+    typedef baseClassName base_t; \
+    className(const protected_tag &, int port): className(port) { } \
+    static headsocket::ptr<className> create(int port) { return std::make_shared<className>(protected_tag{}, port); }
 
 template <typename T>
 class tcp_server : public basic_tcp_server
 {
+  HEADSOCKET_SERVER(tcp_server, basic_tcp_server);
+
 public:
-  typedef basic_tcp_server base_t;
   typedef T client_t;
   typedef ptr<client_t> client_ptr;
-
-  tcp_server(const protected_tag &, int port)
-    : tcp_server(port)
-  {
-    
-  }
-
-  static ptr<tcp_server> create(int port)
-  {
-    return std::make_shared<tcp_server>(protected_tag{}, port);
-  }
 
   virtual ~tcp_server()
   {
@@ -262,12 +257,6 @@ public:
   }
 
 protected:
-  explicit tcp_server(int port)
-    : base_t(port)
-  {
-
-  }
-
   bool handshake(connection &conn) override
   {
     return true;
@@ -451,32 +440,15 @@ private:
 template <typename T>
 class web_socket_server : public tcp_server<T>
 {
+  HEADSOCKET_SERVER(web_socket_server, tcp_server<T>);
+
 public:
-  typedef tcp_server<T> base_t;
-
-  web_socket_server(const protected_tag &, int port)
-    : web_socket_server(port)
-  {
-
-  }
-
-  static ptr<web_socket_server> create(int port)
-  {
-    return std::make_shared<web_socket_server>(protected_tag{}, port);
-  }
-
   virtual ~web_socket_server()
   {
     base_t::stop();
   }
 
 protected:
-  web_socket_server(int port)
-    : base_t(port)
-  {
-
-  }
-
   bool handshake(connection &conn) override
   {
     return detail::websocket_handshake(conn);
