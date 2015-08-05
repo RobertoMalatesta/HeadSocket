@@ -107,6 +107,44 @@ private:
 
 static bool handshake_websocket(connection &conn);
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//---------------------------------------------------------------------------------------------------------------------
+static std::string trim(const std::string &str)
+{
+  size_t trimLeft = 0, trimRight = str.length() - 1;
+
+  while (trimLeft < str.length() && isspace(str[trimLeft]))
+    ++trimLeft;
+
+  while (trimRight < str.length() && isspace(str[trimRight]))
+    --trimRight;
+
+  return (trimRight >= str.length() || trimLeft >= str.length() || trimRight < trimLeft)
+    ? std::string("")
+    : str.substr(trimLeft, trimRight - trimLeft + 1);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+static std::string cut(std::string &str, char delimiter = ' ')
+{
+  std::string result;
+
+  auto pos = str.find(delimiter);
+  if (pos == std::string::npos)
+  {
+    result = str;
+    str = "";
+  }
+  else
+  {
+    result = str.substr(0, pos);
+    str = str.substr(pos + 1);
+  }
+
+  return result;
+}
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -123,6 +161,7 @@ public:
   id_t id() const;
 
   size_t write(const void *ptr, size_t length);
+  size_t write(const std::string &text) { return write(text.c_str(), text.length()); }
   size_t read(void *ptr, size_t length);
 
   bool force_write(const void *ptr, size_t length);

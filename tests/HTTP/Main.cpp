@@ -24,28 +24,45 @@ public:
     stop();
   }
 
-  class response
+  struct response
   {
-  
+    std::string content_type = "text/html";
+    std::string message = "";
   };
   
 protected:
-  virtual void request(response &resp)
+  virtual bool request(const std::string &path, response &resp)
   {
-  
+    return true;
   }
 
   bool handshake(connection &conn) final override
   {
-    std::string line;
-
-    while (conn.read_line(line))
+    std::string requestLine;
+    
+    if (!conn.read_line(requestLine))
+      return false;
+    
+    std::string headerLine;
+    while (conn.read_line(headerLine))
     {
-      if (line.empty())
+      if (headerLine.empty())
         break;
-
-      printf("%s\n", line.c_str());
     }
+
+    std::string method = detail::cut(requestLine);
+    std::string path = detail::cut(requestLine);
+
+    response resp;
+    if (request(path, resp))
+    {
+      std::stringstream ss;
+      ss << "HTTP/1.0 200 OK\n";
+
+      conn.write(ss.str());
+    }
+    else
+      conn.write("HTTP/1.0 404 Not Found\n");
 
     return false;
   }
@@ -66,7 +83,7 @@ private:
 
 int main()
 {
-  int port = 10666;
+  int port = 10667;
   headsocket::http_server server(port);
 
   if (server.is_running())
