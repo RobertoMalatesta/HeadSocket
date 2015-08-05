@@ -38,10 +38,10 @@ In this example server accepts and creates client connections asynchronously and
 
 using namespace headsocket;
 
-class Client : public web_socket_client
+class client : public web_socket_client
 {
 public:
-    HEADSOCKET_CLIENT_CTOR(Client, web_socket_client);
+    HEADSOCKET_CLIENT(client, web_socket_client);
 
     bool async_received_data(const data_block &db, uint8_t *ptr, size_t length) override
     {
@@ -71,10 +71,12 @@ public:
 
 int main()
 {
-	int port = 12345;
-    web_socket_server<Client> server(port);
+    int port = 12345;
+
+    typedef web_socket_server<client> server_t;
+    auto server = server_t::create(port);    
     
-    if (server.is_running())
+    if (server->is_running())
     	std::getChar();
         
     return 0;
@@ -97,7 +99,9 @@ using namespace headsocket;
 int main()
 {
 	int port = 12345;
-    web_socket_server<web_socket_client> server(port);
+
+    typedef web_socket_server<web_socket_client> server_t;
+    auto server = server_t::create(port);
 
 	// Buffer for transfering data blocks out of connected clients
 	std::vector<uint8_t> buffer;
@@ -105,7 +109,7 @@ int main()
 	// Your main loop
 	while (true)
     {
-    	for (auto client : server.clients())
+    	for (auto client : server->clients())
     	{
     		// Loop until there is no new data block available (returned size is 0)
     		while (size_t size = client->peek())
@@ -134,14 +138,14 @@ Abstract class for handling incomming connections. You should never create an in
 
 - `void` **`stop()`** : Stops the server, disconnects all clients.
 - `bool` **`is_running()`** `const`: Returns `true` if server is still running.
-- `void` **`disconnect(basic_tcp_client *client)`**: Forcibly disconnects a client.
+- `void` **`disconnect(ptr<basic_tcp_client> client)`**: Forcibly disconnects a client.
 
 If you want to derive your own `basic_tcp_server`, you are required to implement these methods:
 
 - `bool` **`handshake(connection &conn)`**: Right after server accepts new socket connection, you can optionally do some handshake logic there. If the handshake succeeds or you don't need to do any handshaking at all, return `true`.
-- `basic_tcp_client *` **`accept(connection &conn)`**: Called by the server after handshake is successfully done. This is a factory method for creating your own instances of `basic_tcp_client` classes. If you are not able to create client instance, return `nullptr`.
-- `void` **`client_connected(basic_tcp_client *client)`**: Called when new client is successfully created by previous `accept` call.
-- `void` **`client_disconnected(basic_tcp_client *client)`**: Called before client is disconnected by server.
+- `ptr<basic_tcp_client>` **`accept(connection &conn)`**: Called by the server after handshake is successfully done. This is a factory method for creating your own instances of `basic_tcp_client` classes. If you are not able to create client instance, return `nullptr`.
+- `void` **`client_connected(ptr<basic_tcp_client> client)`**: Called when new client is successfully created by previous `accept` call.
+- `void` **`client_disconnected(ptr<basic_tcp_client> client)`**: Called before client is disconnected by server.
 
 When constructed, `basic_tcp_server` automatically spawns two helper threads; one for accepting incoming connections and one for closing disconnected clients. You can take a look at `basic_tcp_server::accept_thread` implementation to see how the new incoming connections are handled with `handshake`, `accept` and `client_connected` calls.
 
@@ -151,7 +155,7 @@ When constructed, `basic_tcp_server` automatically spawns two helper threads; on
 Concrete implementation of `basic_tcp_server` that makes sure you are not working against `basic_tcp_client` instances, but rather with clients of specified type `<T>`, where `<T>` **must** be derived from `basic_tcp_client`. This is done by making sure that:
 
 - `basic_tcp_server::accept` is overridden and returns new instances of `<T>`
-- `basic_tcp_server::client_connected` is overridden and redirects all calls to a separate `client_connected(T *client)` method
+- `basic_tcp_server::client_connected` is overridden and redirects all calls to a separate `client_connected(ptr<T> client)` method
 - `basic_tcp_server::client_disconnected` is overridden and redirects as well
 - all three methods are made **private**
 
@@ -170,7 +174,7 @@ Public interface provides:
 
 - `void` **`disconnect()`**: Disconnects this client from the server.
 - `bool` **`is_connected()`** `const`: Returns `true` if client is still connected.
-- `basic_tcp_server *` **`server()`** `const`: Returns server instance which originally created this client. Could be `nullptr` if client was created manually.
+- `ptr<basic_tcp_server>` **`server()`** `const`: Returns server instance which originally created this client. Could be `nullptr` if client was created manually.
 - `id_t` **`id()`** `const`: Returns ID assigned by server.
 
 ----------
@@ -184,8 +188,8 @@ Public interface provides these extra methods:
 - `size_t` **`read(void *ptr, size_t length)`**: Reads up to *length* bytes into memory location *ptr*. Returns number of bytes received or `basic_tcp_client::invalid_operation` otherwise.
 - `bool` **`force_write(const void *ptr, size_t length)`**: Forcibly writes *length* bytes from 
 *ptr* - calls `write` method repeatedly to make sure all `length` bytes are sent by this one call. Returns `true` on success, `false` if there was an error.
-- `size_t` **`read_line(void *ptr, size_t length)`**: Reads line up to *length* characters long into *ptr*. Null terminator is added automatically. Returns number of characters received (including null terminator), **zero** on error.
 - `bool` **`force_read(void *ptr, size_t length)`**: Similar to `forceWrite`, forcibly reads *length* bytes into *ptr* - calls `read` method repeatedly until all `length` bytes are received by this one call. Returns `true` on success, `false` on error.
+- `bool` **`read_line(std::string &output)`**: Reads line into *output*. Returns `true` on success.
 
 ----------
 
@@ -195,7 +199,7 @@ Another concrete implementation of `basic_tcp_client`, allows sending and receiv
 Public interface provides these extra methods:
 
 - `void` **`push(const void *ptr, size_t length)`**: Writes (sends) *length* bytes from memory location *ptr*.
-- `void` **`push(const char *text)`**: Writes (sends) string *text*.
+- `void` **`push(const std::string &text)`**: Writes (sends) string *text*.
 - `size_t` **`peek()`** `const`: Returns number of bytes available for reading through `pop`.
 - `size_t` **`pop(void *ptr, size_t length)`**: Copies up to *length* received bytes into memory location *ptr*. Returns number of bytes copied.
 
