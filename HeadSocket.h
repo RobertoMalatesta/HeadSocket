@@ -19,6 +19,7 @@ Usage:
 
 #include <memory>
 #include <string>
+#include <map>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -45,10 +46,24 @@ struct connection_impl;
 struct basic_tcp_server_impl;
 struct basic_tcp_client_impl;
 struct async_tcp_client_impl;
+struct http_server_impl;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static bool handshake_websocket(connection &conn);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct less_comparator : std::binary_function<std::string, std::string, bool>
+{
+  bool operator()(const std::string &s1, const std::string &s2) const
+  {
+    return std::lexicographical_compare(s1.begin(), s1.end(), s2.begin(), s2.end(), [](char c1, char c2)->bool
+    {
+      return tolower(c1) < tolower(c2);
+    });
+  }
+};
 
 }
 
@@ -120,6 +135,7 @@ public:
 
 protected:
   struct protected_tag { };
+  void init() { }
 
   explicit basic_tcp_server(int port);
   virtual ~basic_tcp_server();
@@ -150,16 +166,18 @@ private:
 
 #define HEADSOCKET_SERVER(className, baseClassName) \
   protected: \
-    explicit className(int port): baseClassName(port) { } \
+    explicit className(int port): baseClassName(port) { init(); } \
   public: \
     typedef baseClassName base_t; \
     className(const protected_tag &, int port): className(port) { } \
-    static headsocket::ptr<className> create(int port) { return std::make_shared<className>(protected_tag{}, port); }
+    static headsocket::ptr<className> create(int port) { return std::make_shared<className>(protected_tag{}, port); } \
+  protected: \
+    void init()
 
 template <typename T>
 class tcp_server : public basic_tcp_server
 {
-  HEADSOCKET_SERVER(tcp_server, basic_tcp_server);
+  HEADSOCKET_SERVER(tcp_server, basic_tcp_server) { }
 
 public:
   typedef T client_t;
@@ -394,7 +412,7 @@ private:
 template <typename T>
 class web_socket_server : public tcp_server<T>
 {
-  HEADSOCKET_SERVER(web_socket_server, tcp_server<T>);
+  HEADSOCKET_SERVER(web_socket_server, tcp_server<T>) { }
 
 public:
   virtual ~web_socket_server()
@@ -427,8 +445,21 @@ public:
     std::string message = "";
   };
 
+  struct parameter
+  {
+    std::string name;
+    std::string value;
+    bool boolean;
+    int integer;
+    double real;
+  };
+
+  typedef std::map<std::string, parameter, detail::less_comparator> parameters_t;
+
 protected:
-  virtual bool request(const std::string &path, response &resp) { return false; }
+  virtual bool request(const std::string &path, const parameters_t &params, response &resp) { return false; }
+
+  std::unique_ptr<detail::http_server_impl> _hp;
 
 private:
   bool handshake(connection &conn) final override;
@@ -773,20 +804,45 @@ struct utils
       : str.substr(trimLeft, trimRight - trimLeft + 1);
   }
 
-  static std::string cut_front(std::string &str, char delimiter = ' ')
+  static std::string cut_front(std::string &str, char delimiter = ' ', bool first = true, bool hungry = true)
   {
     std::string result;
 
-    auto pos = str.find(delimiter);
+    auto pos = first ? str.find(delimiter) : str.rfind(delimiter);
     if (pos == std::string::npos)
     {
-      result = str;
-      str = "";
+      if (hungry)
+      {
+        result = str;
+        str = "";
+      }
     }
     else
     {
       result = str.substr(0, pos);
       str = str.substr(pos + 1);
+    }
+
+    return result;
+  }
+
+  static std::string cut_back(std::string &str, char delimiter = ' ', bool first = true, bool hungry = true)
+  {
+    std::string result;
+
+    auto pos = first ? str.rfind(delimiter) : str.find(delimiter);
+    if (pos == std::string::npos)
+    {
+      if (hungry)
+      {
+        result = str;
+        str = "";
+      }
+    }
+    else
+    {
+      result = str.substr(pos + 1);
+      str = str.substr(0, pos);
     }
 
     return result;
@@ -1038,7 +1094,7 @@ struct connection_impl
 
 //---------------------------------------------------------------------------------------------------------------------
 connection::connection(const detail::connection_impl &impl)
-  : _p(new detail::connection_impl())
+  : _p(std::make_unique<detail::connection_impl>())
 {
   _p->assign(impl);
 }
@@ -1206,7 +1262,7 @@ struct basic_tcp_server_impl
 
 //---------------------------------------------------------------------------------------------------------------------
 basic_tcp_server::basic_tcp_server(int port)
-  : _p(new detail::basic_tcp_server_impl())
+  : _p(std::make_unique<detail::basic_tcp_server_impl>())
 {
 #ifdef HEADSOCKET_PLATFORM_WINDOWS
   WSADATA wsaData;
@@ -1483,7 +1539,7 @@ struct basic_tcp_client_impl
 
 //---------------------------------------------------------------------------------------------------------------------
 basic_tcp_client::basic_tcp_client(const std::string &address, int port)
-  : _p(new detail::basic_tcp_client_impl())
+  : _p(std::make_unique<detail::basic_tcp_client_impl>())
 {
   struct addrinfo *result = nullptr, *ptr = nullptr, hints;
 
@@ -1527,7 +1583,7 @@ basic_tcp_client::basic_tcp_client(const std::string &address, int port)
 
 //---------------------------------------------------------------------------------------------------------------------
 basic_tcp_client::basic_tcp_client(ptr<basic_tcp_server> server, connection &conn)
-  : _p(new detail::basic_tcp_client_impl())
+  : _p(std::make_unique<detail::basic_tcp_client_impl>())
 {
   _p->server = server;
   _p->conn.impl()->assign(*(conn.impl()));
@@ -1624,7 +1680,7 @@ struct async_tcp_client_impl
 //---------------------------------------------------------------------------------------------------------------------
 async_tcp_client::async_tcp_client(const std::string &address, int port)
   : base_t(address, port)
-  , _ap(new detail::async_tcp_client_impl())
+  , _ap(std::make_unique<detail::async_tcp_client_impl>())
 {
   init_threads();
 }
@@ -2045,6 +2101,21 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+namespace detail {
+
+struct http_server_impl
+{
+
+};
+
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void http_server::init()
+{
+  _hp = std::make_unique<detail::http_server_impl>();
+}
+
 //---------------------------------------------------------------------------------------------------------------------
 bool http_server::handshake(connection &conn)
 {
@@ -2060,16 +2131,31 @@ bool http_server::handshake(connection &conn)
       break;
   }
 
-#if defined(_DEBUG)
-  std::cout << requestLine << std::endl;
-#endif
-
   std::string method = detail::utils::cut_front(requestLine);
   std::string path = detail::utils::url_decode(detail::utils::cut_front(requestLine));
+  
+  if (!path.empty() && path.front() == '/') path = path.substr(1);
+  if (!path.empty() && path.back() == '/') path = path.substr(0, path.length() - 1);
+
+  std::string params_get = detail::utils::cut_back(path, '?', false, false);
   std::string version = detail::utils::cut_front(requestLine);
+  
+  parameters_t params;
+  std::string param_str;
+  while (!(param_str = detail::utils::cut_front(params_get, '&')).empty())
+  {
+    parameter param;
+    param.name = detail::utils::cut_front(param_str, '=');
+    param.value = param_str;
+    param.integer = atoi(param_str.c_str());
+    param.real = atof(param_str.c_str());
+    param.boolean = (param.integer != 0) || (param_str == "true");
+
+    params[param.name] = param;
+  }
 
   response resp;
-  if (path != "/favicon.ico" && request(path, resp))
+  if (path != "/favicon.ico" && request(path, params, resp))
   {
     std::stringstream ss;
     ss << version << " 200 OK\n";

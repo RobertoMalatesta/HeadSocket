@@ -13,10 +13,10 @@ static const char *xm_player_html =
 
 class http : public headsocket::http_server
 {
-  HEADSOCKET_SERVER(http, headsocket::http_server);
+  HEADSOCKET_SERVER(http, headsocket::http_server) { }
 
 public:
-  bool request(const std::string &path, response &resp) override
+  bool request(const std::string &path, const parameters_t &params, response &resp) override
   {
     resp.message = xm_player_html;
     return true;

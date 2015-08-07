@@ -21,7 +21,7 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 - bug-fixes and suggestions are welcome!
 
 ### What is this good for?
-I needed an easy way to quickly create remote connection interfaces. By embedding small WebSocket server into my code, I can communicate with it from almost any browser, any platform and any place over network. Writing simple debugging tools, remote controllers or profilers gets much easier, because all I need is just a bit of HTML and JavaScript!
+I needed an easy way to quickly create remote connection interfaces. By embedding small HTTP/WebSocket server into my code, I can communicate with it from almost any browser, any platform and any place over network. Writing simple debugging tools, remote controllers or profilers gets much easier, because all I need is just a bit of HTML and JavaScript!
 
 ### What is this NOT good for?
 If you are looking for something *production ready*, safe and fast, you should probably use [C++ Web Toolkit](http://www.webtoolkit.eu/) or [WebSocket++](https://github.com/zaphoyd/websocketpp). This library is meant to be used just for experimental and simple debugging purposes.
@@ -41,9 +41,9 @@ using namespace headsocket;
 
 class client : public web_socket_client
 {
-public:
-    HEADSOCKET_CLIENT(client, web_socket_client);
+    HEADSOCKET_CLIENT(client, web_socket_client) { }
 
+public:
     bool async_received_data(const data_block &db, uint8_t *ptr, size_t length) override
     {
     	if (db.op == opcode::text)
@@ -231,7 +231,7 @@ Extended implementation of `tcp_server<T>`, where `<T>` **must** be derived from
 ### `http_server`
 Extended implementation of `tcp_server<tcp_client>` with slightly altered behavior, providing **VERY NAIVE** HTTP server functionality. You can no longer use regular `basic_tcp_server` callbacks (`handshake`, `accept`, etc.), because `http_server` does not require any clients. The connections are not persistent, so every request is followed by a response and then the socket is closed. You are only required to implement your own `request` handler:
 
-- `bool` **`request(const std::string &path, response &resp)`**: *TODO*
+- `bool` **`request(const std::string &path, const parameters_t &params, response &resp)`**: *TODO*
 
 ----------
 

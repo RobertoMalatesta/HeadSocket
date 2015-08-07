@@ -99,7 +99,7 @@ private:
 
 class server : public headsocket::web_socket_server<client>
 {
-  HEADSOCKET_SERVER(server, headsocket::web_socket_server<client>);
+  HEADSOCKET_SERVER(server, headsocket::web_socket_server<client>) { }
 
 public:
   void client_connected(client_ptr client) override
