@@ -2166,7 +2166,7 @@ bool http_server::handshake(connection &conn)
   }
 
   response resp;
-  if (path != "/favicon.ico" && request(path, params, resp))
+  if (path != "favicon.ico" && request(path, params, resp))
   {
     std::stringstream ss;
     ss << version << " 200 OK\n";
