@@ -2019,6 +2019,9 @@ size_t web_socket_client::async_read_handler(uint8_t *ptr, size_t length)
         case opcode::connection_close:
           kill_threads();
           break;
+
+        default:
+          break;
       }
 
       if (_current_header.op == opcode::text || _current_header.op == opcode::binary)
