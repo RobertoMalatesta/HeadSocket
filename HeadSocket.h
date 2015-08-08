@@ -1806,15 +1806,26 @@ void async_tcp_client::write_thread()
 size_t async_tcp_client::async_write_handler(uint8_t *ptr, size_t length)
 {
   HEADSOCKET_LOCK(_ap->writeBlocks);
-  // TODO
-  return length;
+ 
+  size_t toWrite = _ap->writeBlocks->peek(nullptr);
+  size_t toConsume = length > toWrite ? toWrite : length;
+  _ap->writeBlocks->read(ptr, toConsume);
+
+  if (toWrite == toConsume)
+    _ap->writeSemaphore.consume();
+
+  return toConsume;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 size_t async_tcp_client::async_read_handler(uint8_t *ptr, size_t length)
 {
   HEADSOCKET_LOCK(_ap->readBlocks);
-  // TODO
+
+  _ap->readBlocks->block_begin(opcode::binary);
+  _ap->readBlocks->write(ptr, length);
+  _ap->readBlocks->block_end();
+
   return length;
 }
 
