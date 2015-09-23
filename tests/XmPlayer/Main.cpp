@@ -2,7 +2,7 @@
 #include <sstream>
 
 #define HEADSOCKET_IMPLEMENTATION
-#include <HeadSocket.h>
+#include <headsocket/headsocket.h>
 
 #include "libxm/xm.h"
 

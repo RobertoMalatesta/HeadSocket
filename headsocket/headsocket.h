@@ -11,7 +11,7 @@ Usage:
   HEADSOCKET_IMPLEMENTATION beforehand, like this:
 
     #define HEADSOCKET_IMPLEMENTATION
-    #include <HeadSocket.h>
+    #include <headsocket.h>
 
 /*/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #ifndef __HEADSOCKET_H__
@@ -46,7 +46,6 @@ struct connection_impl;
 struct basic_tcp_server_impl;
 struct basic_tcp_client_impl;
 struct async_tcp_client_impl;
-struct http_server_impl;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -459,8 +458,6 @@ public:
 protected:
   virtual bool request(const std::string &path, const parameters_t &params, response &resp) { return false; }
 
-  std::unique_ptr<detail::http_server_impl> _hp;
-
 private:
   bool handshake(connection &conn) final override;
 
@@ -486,6 +483,7 @@ private:
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <sstream>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -2117,17 +2115,12 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
 
 namespace detail {
 
-struct http_server_impl
-{
-
-};
-
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 void http_server::init()
 {
-  _hp = std::make_unique<detail::http_server_impl>();
+
 }
 
 //---------------------------------------------------------------------------------------------------------------------
