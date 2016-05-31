@@ -24,7 +24,10 @@ PUBLIC DOMAIN - **no warranty** implied or offered, use this at your own risk
 I needed an easy way to quickly create remote connection interfaces. By embedding small HTTP/WebSocket server into my code, I can communicate with it from almost any browser, any platform and any place over network. Writing simple debugging tools, remote controllers or profilers gets much easier, because all I need is just a bit of HTML and JavaScript!
 
 ### What is this NOT good for?
-If you are looking for something *production ready*, safe and fast, you should probably use [C++ Web Toolkit](http://www.webtoolkit.eu/) or [WebSocket++](https://github.com/zaphoyd/websocketpp). This library is meant to be used just for experimental and simple debugging purposes.
+This library is meant to be used just for experimental and simple debugging purposes. If you are looking for something *production ready*, safe and fast, you should probably use one of these:
+- [C++ Web Toolkit](http://www.webtoolkit.eu/)
+- [WebSocket++](https://github.com/zaphoyd/websocketpp)
+- [Beast](https://github.com/vinniefalco/Beast)
 
 ----------
 
