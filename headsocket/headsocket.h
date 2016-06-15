@@ -287,6 +287,8 @@ protected:
 
   friend class basic_tcp_server;
 
+  virtual void on_accept() { }
+
   basic_tcp_client(const std::string &address, int port);
   basic_tcp_client(ptr<basic_tcp_server> server, connection &conn);
 
@@ -317,7 +319,7 @@ protected:
 
 class tcp_client : public basic_tcp_client
 {
-  HEADSOCKET_CLIENT_BASE(tcp_client);
+  HEADSOCKET_CLIENT_BASE(tcp_client)
 
 public:
   typedef basic_tcp_client base_t;
@@ -338,7 +340,7 @@ public:
 
 class async_tcp_client : public basic_tcp_client
 {
-  HEADSOCKET_CLIENT_BASE(async_tcp_client);
+  HEADSOCKET_CLIENT_BASE(async_tcp_client)
 
 public:
   typedef basic_tcp_client base_t;
@@ -352,7 +354,10 @@ public:
   size_t pop(void *ptr, size_t length);
 
 protected:
+  void on_accept() override { init_threads(); }
+
   virtual void init_threads();
+
   virtual size_t async_write_handler(uint8_t *ptr, size_t length);
   virtual size_t async_read_handler(uint8_t *ptr, size_t length);
 
@@ -373,7 +378,7 @@ private:
 
 class web_socket_client : public async_tcp_client
 {
-  HEADSOCKET_CLIENT_BASE(web_socket_client);
+  HEADSOCKET_CLIENT_BASE(web_socket_client)
   
 public:
   static const size_t frame_size_limit = 128 * 1024;
@@ -430,7 +435,7 @@ private:
 
 class http_server : public tcp_server<tcp_client>
 {
-  HEADSOCKET_SERVER(http_server, tcp_server<tcp_client>);
+  HEADSOCKET_SERVER(http_server, tcp_server<tcp_client>) { }
 
 public:
   ~http_server()
@@ -666,7 +671,7 @@ private:
       else
         f = dig[1] ^ dig[2] ^ dig[3], k = 0xCA62C1D6;
 
-      uint32_t temp = rotate_left(dig[0], 5) + f + dig[4] + k + w[i];
+      uint32_t temp = static_cast<uint32_t>(rotate_left(dig[0], 5) + f + dig[4] + k + w[i]);
       dig[4] = dig[3];
       dig[3] = dig[2];
       dig[2] = rotate_left(dig[1], 30);
@@ -1118,7 +1123,7 @@ size_t connection::write(const void *ptr, size_t length)
   if (!ptr || !length)
     return 0;
 
-  int result = send(_p->socket, static_cast<const char *>(ptr), length, 0);
+  int result = send(_p->socket, static_cast<const char *>(ptr), static_cast<int>(length), 0);
 
   if (!result || result == detail::socket_error)
     return 0;
@@ -1139,7 +1144,7 @@ bool connection::force_write(const void *ptr, size_t length)
 
   while (length)
   {
-    int result = send(_p->socket, chPtr, length, 0);
+    int result = send(_p->socket, chPtr, static_cast<int>(length), 0);
 
     if (!result || result == detail::socket_error)
       return false;
@@ -1160,7 +1165,7 @@ size_t connection::read(void *ptr, size_t length)
   if (!ptr || !length)
     return 0;
 
-  int result = recv(_p->socket, static_cast<char *>(ptr), length, 0);
+  int result = recv(_p->socket, static_cast<char *>(ptr), static_cast<int>(length), 0);
 
   if (!result || result == detail::socket_error)
     return 0;
@@ -1181,7 +1186,7 @@ bool connection::force_read(void *ptr, size_t length)
 
   while (length)
   {
-    int result = recv(_p->socket, chPtr, length, 0);
+    int result = recv(_p->socket, chPtr, static_cast<int>(length), 0);
 
     if (!result || result == detail::socket_error)
       return false;
@@ -1471,6 +1476,8 @@ void basic_tcp_server::accept_thread()
       {
         if (newClient = accept(conn))
         {
+          newClient->on_accept();
+
           HEADSOCKET_LOCK(_p->connections);
           _p->connections->push_back(newClient);
         }
@@ -1680,7 +1687,7 @@ async_tcp_client::async_tcp_client(const std::string &address, int port)
   : base_t(address, port)
   , _ap(std::make_unique<detail::async_tcp_client_impl>())
 {
-  init_threads();
+  
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1688,7 +1695,7 @@ async_tcp_client::async_tcp_client(ptr<basic_tcp_server> server, connection &con
   : base_t(server, conn)
   , _ap(new detail::async_tcp_client_impl())
 {
-  init_threads();
+  
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1786,7 +1793,7 @@ void async_tcp_client::write_thread()
 
       while (written)
       {
-        int result = send(_p->conn.impl()->socket, cursor, written, 0);
+        int result = send(_p->conn.impl()->socket, cursor, static_cast<int>(written), 0);
 
         if (!result || result == detail::socket_error)
           break;
@@ -1839,11 +1846,15 @@ void async_tcp_client::read_thread()
   {
     while (true)
     {
-      int result = static_cast<size_t>(bufferBytes);
+      int result = static_cast<int>(bufferBytes);
 
       if (!result || !consumed)
       {
-        result = recv(_p->conn.impl()->socket, reinterpret_cast<char *>(buffer.data() + bufferBytes), buffer.size() - bufferBytes, 0);
+        result = recv(
+          _p->conn.impl()->socket,
+          reinterpret_cast<char *>(buffer.data() + bufferBytes),
+          static_cast<int>(buffer.size() - bufferBytes),
+          0);
 
         if (!result || result == detail::socket_error)
         {
@@ -2114,12 +2125,6 @@ size_t web_socket_client::frame_header::write(uint8_t *ptr, size_t length) const
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
-
-}
-
-//---------------------------------------------------------------------------------------------------------------------
-void http_server::init()
-{
 
 }
 
