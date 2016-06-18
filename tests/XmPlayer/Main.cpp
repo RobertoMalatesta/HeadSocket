@@ -38,6 +38,14 @@ public:
     std::cout << "Client " << id() << " disconnected!" << std::endl;
   }
 
+  static inline int8_t quantize_sample(float sample)
+  {
+    float sign = static_cast<float>((sample > 0) - (sample < 0));
+    sample = std::pow(std::abs(sample), 0.25f);
+    sample *= sign;
+    return static_cast<int8_t>(sample * 127.0f);
+  }
+
   bool async_received_data(const headsocket::data_block &db, uint8_t *ptr, size_t length) override
   {
     if (db.op != headsocket::opcode::text) return true;
@@ -83,8 +91,8 @@ public:
 
       for (size_t i = 0, j = 0; i < value; i += 4, j += 2)
       {
-        _smallSampleBuffer[j + 0] = static_cast<int8_t>((_sampleBuffer[i + 0] + _sampleBuffer[i + 2]) * 0.5f * 127.0f);
-        _smallSampleBuffer[j + 1] = static_cast<int8_t>((_sampleBuffer[i + 1] + _sampleBuffer[i + 3]) * 0.5f * 127.0f);
+        _smallSampleBuffer[j + 0] = quantize_sample((_sampleBuffer[i + 0] + _sampleBuffer[i + 2]) * 0.5f);
+        _smallSampleBuffer[j + 1] = quantize_sample((_sampleBuffer[i + 1] + _sampleBuffer[i + 3]) * 0.5f);
       }
 
       push(_smallSampleBuffer.data(), sizeof(int8_t) * _smallSampleBuffer.size());

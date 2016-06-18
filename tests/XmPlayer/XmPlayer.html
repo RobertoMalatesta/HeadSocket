@@ -73,12 +73,17 @@
     content.innerHTML = "Disconnected...";
   }
 
+  function dequantize(s) {
+    var sign = (s > 0) - (s < 0) + 0.0;
+    return Math.pow(Math.abs(s), 1.0 / 0.25) * sign;
+  }
+
   function onMessage(e) {
     var int8s = new Int8Array(e.data);
     var samples = int8s.length;
     
     for (var i = 0; i < samples; ++i)
-      sampleBuffer.push(int8s[i] / 127.0);
+      sampleBuffer.push(dequantize(int8s[i] / 127.0));
       
     totalSamplesStreamed += samples / 2;
     content.innerHTML = "Streaming XM music from: " + uri + "<br />";
