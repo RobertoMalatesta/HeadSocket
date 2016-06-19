@@ -18,7 +18,7 @@ static size_t enumerateDirectoryInternal(const std::string &path, bool recursive
   if (fixedPath[fixedPath.length() - 1] == '\\')
     fixedPath = fixedPath.substr(0, fixedPath.length() - 1);
 
-  HANDLE h = FindFirstFile((fixedPath + "\\*").data(), &ffd);
+  HANDLE h = FindFirstFileA((fixedPath + "\\*").data(), &ffd);
 
   if (h == INVALID_HANDLE_VALUE)
     return 0;
@@ -46,7 +46,7 @@ static size_t enumerateDirectoryInternal(const std::string &path, bool recursive
     else
       ++result;
 
-  } while (FindNextFile(h, &ffd) != 0);
+  } while (FindNextFileA(h, &ffd) != 0);
 
   FindClose(h);
 
@@ -60,7 +60,7 @@ static size_t enumerateDirectory(const std::string &path, bool recursive, Enumer
 
 static bool fileOrDirectoryExists(const std::string &fileName)
 {
-  DWORD attribs = GetFileAttributes(fileName.c_str());
+  DWORD attribs = GetFileAttributesA(fileName.c_str());
   return attribs != INVALID_FILE_ATTRIBUTES;
 }
 

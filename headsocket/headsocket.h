@@ -288,6 +288,7 @@ protected:
   friend class basic_tcp_server;
 
   virtual void on_accept() { }
+  virtual void on_disconnect() { }
 
   basic_tcp_client(const std::string &address, int port);
   basic_tcp_client(ptr<basic_tcp_server> server, connection &conn);
@@ -355,6 +356,7 @@ public:
 
 protected:
   void on_accept() override { init_threads(); }
+  void on_disconnect() override { kill_threads(); }
 
   virtual void init_threads();
 
@@ -891,10 +893,10 @@ struct semaphore
     count = 0;
   }
 
-  void lock() const
+  void lock(size_t minCount = 0) const
   {
     std::unique_lock<std::mutex> lock(mutex);
-    cv.wait(lock, [&]()->bool { return count > 0; });
+    cv.wait(lock, [&]()->bool { return count > minCount; });
     lock.release();
   }
 
@@ -1442,7 +1444,10 @@ void basic_tcp_server::remove_disconnected() const
     auto &clientRef = _p->connections.value[i];
 
     if (!clientRef.client->is_connected() && clientRef.refCount == 0)
+    {
+      clientRef.client->on_disconnect();
       _p->connections->erase(_p->connections->begin() + i);
+    }
     else
       ++i;
   }
@@ -1676,6 +1681,7 @@ struct async_tcp_client_impl
   detail::lockable_value<detail::data_block_buffer> readBlocks;
   std::unique_ptr<std::thread> writeThread;
   std::unique_ptr<std::thread> readThread;
+  std::atomic_int threadCounter = { 0 };
 };
 
 }
@@ -1759,6 +1765,7 @@ size_t async_tcp_client::pop(void *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 void async_tcp_client::init_threads()
 {
+  _ap->threadCounter = 0;
   _ap->writeThread = std::make_unique<std::thread>(std::bind(&async_tcp_client::write_thread, this));
   _ap->readThread = std::make_unique<std::thread>(std::bind(&async_tcp_client::read_thread, this));
 }
@@ -1766,6 +1773,7 @@ void async_tcp_client::init_threads()
 //---------------------------------------------------------------------------------------------------------------------
 void async_tcp_client::write_thread()
 {
+  ++_ap->threadCounter;
   detail::set_thread_name("AsyncTcpClient::writeThread");
 
   std::vector<uint8_t> buffer(1024 * 1024);
@@ -1805,6 +1813,7 @@ void async_tcp_client::write_thread()
   }
 
   kill_threads();
+  --_ap->threadCounter;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -1837,6 +1846,7 @@ size_t async_tcp_client::async_read_handler(uint8_t *ptr, size_t length)
 //---------------------------------------------------------------------------------------------------------------------
 void async_tcp_client::read_thread()
 {
+  ++_ap->threadCounter;
   detail::set_thread_name("AsyncTcpClient::readThread");
 
   std::vector<uint8_t> buffer(1024 * 1024);
@@ -1886,6 +1896,7 @@ void async_tcp_client::read_thread()
   }
 
   kill_threads();
+  --_ap->threadCounter;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
