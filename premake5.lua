@@ -2,11 +2,8 @@ dofile("etc/premake5/Utils.lua")
 
 solution "HeadSocket"
   configurations { "Debug", "Release" }
-  platforms { "32-bit", "64-bit" }
+  platforms { "64-bit" }
   location(path.join(".build", _ACTION))
-  
-filter { "platforms:32-bit" }
-  architecture "x86"
 
 filter { "platforms:64-bit" }
   architecture "x86_64"
@@ -23,10 +20,10 @@ filter { "configurations:Release" }
 filter { "system:windows" }
   defines { "_CRT_SECURE_NO_WARNINGS", "_WIN32_WINNT=0x0601", "WINVER=0x0601" }
   
-  if _ACTION == "vs2013" then
-    defines { "_MSC_VER=1700" }
-  elseif _ACTION == "vs2015" then
+  if _ACTION == "vs2015" then
     defines { "_MSC_VER=1900" }
+  elseif _ACTION == "vs2017" then
+    defines { "_MSC_VER=1910" }
   end
   
 filter { }
