@@ -1027,9 +1027,9 @@ bool handshake_websocket(connection &conn)
   detail::sha1::digest8_t digest;
   sha.process_bytes(key.c_str(), key.length());
 
-  std::string response = "HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: ";
+  std::string response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ";
   response += detail::utils::base64_encode(sha.get_digest_bytes(digest), 20);
-  response += "\n\n";
+  response += "\r\n\r\n";
 
   return conn.force_write(response.c_str(), response.length());
 }
@@ -2181,9 +2181,9 @@ bool http_server::handshake(connection &conn)
   if (path != "favicon.ico" && request(path, params, resp))
   {
     std::stringstream ss;
-    ss << version << " 200 OK\n";
-    ss << "Content-Type: " << resp.content_type << "\n";
-    ss << "Content-Length: " << resp.message.length() << "\n\n";
+    ss << version << " 200 OK\r\n";
+    ss << "Content-Type: " << resp.content_type << "\r\n";
+    ss << "Content-Length: " << resp.message.length() << "\r\n\r\n";
     ss << resp.message;
 
     conn.write(ss.str());
@@ -2191,7 +2191,7 @@ bool http_server::handshake(connection &conn)
   else
   {
     conn.write(version);
-    conn.write(" 404 Not Found\n");
+    conn.write(" 404 Not Found\r\n");
   }
 
   return false;
